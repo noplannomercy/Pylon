@@ -120,6 +120,26 @@ def create_app(store=None, config: Config = None) -> FastAPI:
                 await current_store.update_file(f.file_id, forge_status="skipped")
         return {"job_id": job.job_id, "status": "processing", "file_count": len(files)}
 
+    @app.get("/openapi-all.json", include_in_schema=False)
+    async def openapi_all(request: Request):
+        import httpx as _httpx
+        cfg = request.app.state.config
+        merged = app.openapi()
+
+        for name, url in [("forge", cfg.forge_url), ("lightrag", cfg.lightrag_url)]:
+            try:
+                async with _httpx.AsyncClient(timeout=5.0) as c:
+                    r = await c.get(f"{url}/openapi.json")
+                if r.status_code == 200:
+                    spec = r.json()
+                    for path, item in spec.get("paths", {}).items():
+                        prefixed = f"/{name}{path}"
+                        merged.setdefault("paths", {})[prefixed] = item
+            except Exception as e:
+                logger.warning("Failed to fetch openapi from %s: %s", name, e)
+
+        return merged
+
     return app
 
 app = create_app()
