@@ -12,7 +12,28 @@
 
 ---
 
-## 2. 설치
+## 2. DB 생성 (최초 1회)
+
+Pylon은 전용 DB를 사용한다. Hostinger PostgreSQL에 접속해서 생성:
+
+```bash
+# postgres 컨테이너 접속
+docker exec -it <postgres_container_name> psql -U postgres
+
+# psql 프롬프트에서
+CREATE USER pylon WITH PASSWORD 'your_password';
+CREATE DATABASE pylon_dev OWNER pylon;
+\q
+```
+
+DATABASE_URL 형식:
+```
+postgresql://pylon:your_password@<hostinger_ip>:<port>/pylon_dev
+```
+
+---
+
+## 3. 설치
 
 ```bash
 # 1. 클론
@@ -55,7 +76,7 @@ curl http://localhost:8001/health
 
 ---
 
-## 3. Bitbucket Webhook 설정
+## 4. Bitbucket Webhook 설정
 
 Bitbucket 레포 → Repository settings → Webhooks:
 - URL: `http://<서버IP>:8001/webhook/bitbucket`
@@ -64,7 +85,7 @@ Bitbucket 레포 → Repository settings → Webhooks:
 
 ---
 
-## 4. 주요 명령어
+## 5. 주요 명령어
 
 ```bash
 # 로그 확인
@@ -82,7 +103,7 @@ docker compose down
 
 ---
 
-## 5. 트러블슈팅
+## 6. 트러블슈팅
 
 | 증상 | 원인 | 조치 |
 |------|------|------|
