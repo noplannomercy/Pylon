@@ -116,7 +116,7 @@ curl http://localhost:8001/health/all
 
 ```
 LIGHTRAG_URL=http://193.168.195.222:9621
-FORGE_URL=http://localhost:8003
+FORGE_URL=http://193.168.195.222:8003
 CITADEL_URL=http://localhost:8004
 NEXUS_URL=http://localhost:8005
 SELF_URL=http://localhost:8001
