@@ -71,8 +71,10 @@ Bitbucket PR Merge
   → Bitbucket API로 파일 bytes fetch  ← [미구현]
   → plsql: CitadelClient.submit()    ← [미구현]
   → document: ForgeClient.convert()  ← [미구현]
-  → POST /callback/citadel 또는 POST /callback/forge 수신
-  → advance_pipeline() → LightRAGClient.ingest_text()
+  → plsql  → POST /callback/citadel 수신 → advance_pipeline() → LightRAG ingest
+  → document → POST /callback/forge 수신  → advance_pipeline() → LightRAG ingest
+  → code   → skipped 기록만 (Graphify는 사람이 직접 돌린 뒤 POST /ingest/graphify-rebuild)
+  → skip   → skipped 기록만
   → _maybe_close_job() → job status 완료 처리
 ```
 
@@ -83,7 +85,7 @@ Bitbucket PR Merge
 | # | 항목 | 비고 |
 |---|------|------|
 | 🔴 1 | **Bitbucket 파일 bytes fetch** | Bitbucket API 클라이언트 미구현 |
-| 🔴 2 | **Citadel/Forge 실제 호출** | webhook/bulk에서 external_job_id 저장 없음 |
+| 🔴 2 | **Citadel/Forge 실제 호출** | webhook/bulk에서 파일 생성 후 submit() 미호출 → external_job_id가 null로 남음 → 콜백 매칭 불가 → job이 processing에서 영원히 대기 |
 | 🟡 3 | **PostgreSQL 연결** | `.env`에 `DATABASE_URL` 추가만 하면 됨 (코드 준비됨) |
 | 🟡 4 | **Admin 인증** | 현재 모든 admin 엔드포인트 인증 없음 |
 | 🟡 5 | **docker-compose.yml** | Dockerfile은 있음 |
