@@ -8,6 +8,6 @@ def test_ingestion_job_defaults():
 
 def test_ingestion_file_defaults():
     f = IngestionFile(file_id="xyz", job_id="abc", file_path="src/PKG_LOAN.pkb", file_type="plsql")
-    assert f.forge_status == "queued"
+    assert f.external_status == "queued"
     assert f.rag_status == "pending"
     assert f.review_status == "auto_approved"

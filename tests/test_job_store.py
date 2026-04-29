@@ -16,19 +16,19 @@ async def test_create_and_update_file():
     store = InMemoryJobStore()
     job = await store.create_job(source_type="webhook", repo="GCore")
     f = await store.create_file(job_id=job.job_id, file_path="src/PKG.pkb", file_type="plsql")
-    assert f.forge_status == "queued"
-    await store.update_file(f.file_id, forge_status="done", forge_job_id="forge-xyz")
+    assert f.external_status == "queued"
+    await store.update_file(f.file_id, external_status="done", external_job_id="citadel-xyz")
     updated = await store.get_file(f.file_id)
-    assert updated.forge_status == "done"
-    assert updated.forge_job_id == "forge-xyz"
+    assert updated.external_status == "done"
+    assert updated.external_job_id == "citadel-xyz"
 
 @pytest.mark.asyncio
-async def test_get_file_by_forge_job_id():
+async def test_get_file_by_external_job_id():
     store = InMemoryJobStore()
     job = await store.create_job(source_type="webhook", repo="GCore")
     f = await store.create_file(job_id=job.job_id, file_path="src/PKG.pkb", file_type="plsql")
-    await store.update_file(f.file_id, forge_job_id="forge-xyz")
-    result = await store.get_file_by_forge_job_id("forge-xyz")
+    await store.update_file(f.file_id, external_job_id="citadel-xyz")
+    result = await store.get_file_by_external_job_id("citadel-xyz")
     assert result is not None
     assert result.file_id == f.file_id
 

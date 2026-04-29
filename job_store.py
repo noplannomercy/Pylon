@@ -48,9 +48,9 @@ class InMemoryJobStore:
     async def get_file(self, file_id: str) -> Optional[IngestionFile]:
         return self._files.get(file_id)
 
-    async def get_file_by_forge_job_id(self, forge_job_id: str) -> Optional[IngestionFile]:
+    async def get_file_by_external_job_id(self, external_job_id: str) -> Optional[IngestionFile]:
         for f in self._files.values():
-            if f.forge_job_id == forge_job_id:
+            if f.external_job_id == external_job_id:
                 return f
         return None
 
@@ -80,7 +80,7 @@ class InMemoryJobStore:
         jobs = list(self._jobs.values())
         files = list(self._files.values())
         today_jobs = [j for j in jobs if j.created_at and j.created_at.date().isoformat() == today_str]
-        failed_files = [f for f in files if f.forge_status == "failed" or f.rag_status == "failed"]
+        failed_files = [f for f in files if f.external_status == "failed" or f.rag_status == "failed"]
         return {
             "today": {
                 "jobs": len(today_jobs),
@@ -91,7 +91,7 @@ class InMemoryJobStore:
             "total": {"jobs": len(jobs), "files": len(files)},
             "recent_failures": [
                 {"file_id": f.file_id, "file_path": f.file_path, "job_id": f.job_id,
-                 "forge_status": f.forge_status, "rag_status": f.rag_status, "error": f.error}
+                 "external_status": f.external_status, "rag_status": f.rag_status, "error": f.error}
                 for f in failed_files[-10:]
             ],
         }
@@ -140,9 +140,9 @@ class PostgresJobStore:
             row = await conn.fetchrow("SELECT * FROM ingestion_file WHERE file_id = $1", file_id)
         return IngestionFile(**dict(row)) if row else None
 
-    async def get_file_by_forge_job_id(self, forge_job_id: str) -> Optional[IngestionFile]:
+    async def get_file_by_external_job_id(self, external_job_id: str) -> Optional[IngestionFile]:
         async with self._pool.acquire() as conn:
-            row = await conn.fetchrow("SELECT * FROM ingestion_file WHERE forge_job_id = $1", forge_job_id)
+            row = await conn.fetchrow("SELECT * FROM ingestion_file WHERE external_job_id = $1", external_job_id)
         return IngestionFile(**dict(row)) if row else None
 
     async def update_file(self, file_id: str, **kwargs) -> Optional[IngestionFile]:
@@ -193,8 +193,8 @@ class PostgresJobStore:
             total_jobs = await conn.fetchval("SELECT COUNT(*) FROM ingestion_job")
             total_files = await conn.fetchval("SELECT COUNT(*) FROM ingestion_file")
             failures = await conn.fetch(
-                """SELECT file_id, file_path, job_id, forge_status, rag_status, error
-                   FROM ingestion_file WHERE forge_status='failed' OR rag_status='failed'
+                """SELECT file_id, file_path, job_id, external_status, rag_status, error
+                   FROM ingestion_file WHERE external_status='failed' OR rag_status='failed'
                    ORDER BY created_at DESC LIMIT 10"""
             )
         return {

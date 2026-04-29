@@ -58,9 +58,9 @@ def create_admin_router(app_state) -> APIRouter:
         forge = getattr(app_state, "forge", None)
         if lightrag is None:
             raise HTTPException(status_code=503, detail="LightRAG client not available")
-        if forge is None or not f.forge_job_id:
-            raise HTTPException(status_code=400, detail="Forge job_id not available for re-ingest")
-        forge_result = await forge.get_job(f.forge_job_id)
+        if forge is None or not f.external_job_id:
+            raise HTTPException(status_code=400, detail="external_job_id not available for re-ingest")
+        forge_result = await forge.get_job(f.external_job_id)
         result_text = (forge_result.get("result") or {}).get("text", "")
         await app_state.store.update_file(file_id, rag_status="ingesting")
         try:
@@ -80,9 +80,9 @@ def create_admin_router(app_state) -> APIRouter:
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         files = await app_state.store.list_files_for_job(job_id)
-        failed = [f for f in files if f.forge_status == "failed" or f.rag_status == "failed"]
+        failed = [f for f in files if f.external_status == "failed" or f.rag_status == "failed"]
         for f in failed:
-            await app_state.store.update_file(f.file_id, forge_status="queued", rag_status="pending", error=None)
+            await app_state.store.update_file(f.file_id, external_status="queued", rag_status="pending", error=None)
         return {"retried": len(failed)}
 
     @router.get("/stats")

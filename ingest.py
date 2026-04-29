@@ -6,6 +6,7 @@ logger = logging.getLogger(__name__)
 
 PLSQL_EXTS = {".pkb", ".pks", ".sql", ".prc", ".fnc"}
 DOCUMENT_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".md", ".txt", ".hwpx"}
+CODE_EXTS = {".java", ".js", ".ts", ".jsx", ".tsx", ".py"}
 
 def classify_file(file_path: str) -> str:
     if "." not in file_path:
@@ -15,6 +16,8 @@ def classify_file(file_path: str) -> str:
         return "plsql"
     if ext in DOCUMENT_EXTS:
         return "document"
+    if ext in CODE_EXTS:
+        return "code"
     return "skip"
 
 class ForgeClient:
@@ -25,19 +28,12 @@ class ForgeClient:
             timeout=30.0,
         )
 
-    async def convert(self, file_bytes: bytes, file_name: str, file_type: str, callback_url: str) -> dict:
-        if file_type == "plsql":
-            resp = await self._client.post(
-                "/reverse-doc",
-                files={"file": (file_name, file_bytes, "text/plain")},
-                data={"callback_url": callback_url, "requested_by": "ingestion-router"},
-            )
-        else:
-            resp = await self._client.post(
-                "/convert",
-                files={"file": (file_name, file_bytes, "application/octet-stream")},
-                params={"callback_url": callback_url, "requested_by": "ingestion-router"},
-            )
+    async def convert(self, file_bytes: bytes, file_name: str, callback_url: str) -> dict:
+        resp = await self._client.post(
+            "/convert",
+            files={"file": (file_name, file_bytes, "application/octet-stream")},
+            params={"callback_url": callback_url, "requested_by": "ingestion-router"},
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -48,6 +44,55 @@ class ForgeClient:
 
     async def close(self):
         await self._client.aclose()
+
+
+class CitadelClient:
+    def __init__(self, base_url: str, api_key: str):
+        headers = {}
+        if api_key:
+            headers["X-API-Key"] = api_key
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers=headers,
+            timeout=30.0,
+        )
+
+    async def submit(self, file_bytes: bytes, file_name: str, callback_url: str) -> dict:
+        resp = await self._client.post(
+            "/jobs",
+            files={"file": (file_name, file_bytes, "text/plain")},
+            data={
+                "asset_type": "plsql",
+                "callback_url": callback_url,
+                "requested_by": "ingestion-router",
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()
+
+    async def close(self):
+        await self._client.aclose()
+
+
+class NexusClient:
+    def __init__(self, base_url: str, api_key: str):
+        headers = {}
+        if api_key:
+            headers["X-Api-Key"] = api_key
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            headers=headers,
+            timeout=30.0,
+        )
+
+    async def rebuild(self) -> dict:
+        resp = await self._client.post("/rebuild/")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def close(self):
+        await self._client.aclose()
+
 
 class LightRAGClient:
     def __init__(self, base_url: str, api_key: str):
@@ -68,19 +113,20 @@ class LightRAGClient:
     async def close(self):
         await self._client.aclose()
 
-async def advance_pipeline(forge_job_id: str, callback_body: dict, store, lightrag: LightRAGClient):
-    f = await store.get_file_by_forge_job_id(forge_job_id)
+
+async def advance_pipeline(external_job_id: str, callback_body: dict, store, lightrag: LightRAGClient):
+    f = await store.get_file_by_external_job_id(external_job_id)
     if f is None:
-        logger.warning("Unknown forge_job_id in callback: %s", forge_job_id)
+        logger.warning("Unknown external_job_id in callback: %s", external_job_id)
         return
 
     if callback_body.get("status") != "completed":
-        error_msg = callback_body.get("error", "forge failed")
-        await store.update_file(f.file_id, forge_status="failed", error=error_msg)
+        error_msg = callback_body.get("error", "processing failed")
+        await store.update_file(f.file_id, external_status="failed", error=error_msg)
         await _maybe_close_job(f.job_id, store)
         return
 
-    await store.update_file(f.file_id, forge_status="done", rag_status="ingesting")
+    await store.update_file(f.file_id, external_status="done", rag_status="ingesting")
 
     result_text = (callback_body.get("result") or {}).get("text", "")
     try:
@@ -90,7 +136,7 @@ async def advance_pipeline(forge_job_id: str, callback_body: dict, store, lightr
                 "file_id": f.file_id,
                 "job_id": f.job_id,
                 "file_path": f.file_path,
-                "forge_job_id": forge_job_id,
+                "external_job_id": external_job_id,
             },
         )
         await store.update_file(f.file_id, rag_status="ingested", completed_at=datetime.now(timezone.utc))
@@ -100,18 +146,19 @@ async def advance_pipeline(forge_job_id: str, callback_body: dict, store, lightr
 
     await _maybe_close_job(f.job_id, store)
 
+
 async def _maybe_close_job(job_id: str, store):
     files = await store.list_files_for_job(job_id)
     if not files:
         return
-    forge_terminal = {"done", "skipped", "failed"}
-    if not all(f.forge_status in forge_terminal for f in files):
+    external_terminal = {"done", "skipped", "failed"}
+    if not all(f.external_status in external_terminal for f in files):
         return
-    rag_terminal = {"ingested", "failed", "pending"}
+    rag_terminal = {"ingested", "failed", "pending", "skipped"}
     if not all(f.rag_status in rag_terminal for f in files):
         return
 
-    success = sum(1 for f in files if f.rag_status == "ingested" or f.file_type == "skip")
+    success = sum(1 for f in files if f.rag_status == "ingested" or f.file_type in ("skip", "code"))
     total = len(files)
     if success == total:
         status = "completed"

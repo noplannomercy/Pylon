@@ -4,21 +4,24 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import FastAPI, HTTPException, Request
 
 from config import Config
-from ingest import ForgeClient, LightRAGClient, classify_file, advance_pipeline
+from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job
 from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
 
 logger = logging.getLogger(__name__)
 
+
 async def _safe_process(coro):
     try:
         await coro
     except Exception:
         logger.exception("Unhandled pipeline error")
+
 
 def create_app(store=None, config: Config = None) -> FastAPI:
     config = config or Config()
@@ -28,6 +31,8 @@ def create_app(store=None, config: Config = None) -> FastAPI:
     async def lifespan(a):
         a.state.config = config
         a.state.forge = ForgeClient(base_url=config.forge_url, api_key=config.forge_api_key)
+        a.state.citadel = CitadelClient(base_url=config.citadel_url, api_key=config.citadel_api_key)
+        a.state.nexus = NexusClient(base_url=config.nexus_url, api_key=config.nexus_api_key)
         a.state.lightrag = LightRAGClient(base_url=config.lightrag_url, api_key=config.lightrag_api_key)
 
         if config.database_url:
@@ -46,14 +51,18 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         yield
 
         await a.state.forge.close()
+        await a.state.citadel.close()
+        await a.state.nexus.close()
         await a.state.lightrag.close()
         if hasattr(a.state, "pool"):
             await a.state.pool.close()
 
-    app = FastAPI(title="HCS Ingestion Router", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="HCS Ingestion Router", version="0.2.0", lifespan=lifespan)
     app.state.store = store
     app.state.config = config
     app.state.forge = None
+    app.state.citadel = None
+    app.state.nexus = None
     app.state.lightrag = None
 
     app.include_router(create_admin_router(app.state))
@@ -85,21 +94,43 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         for file_path in parsed["files"]:
             file_type = classify_file(file_path)
             f = await current_store.create_file(job_id=job.job_id, file_path=file_path, file_type=file_type)
-            if file_type == "skip":
-                await current_store.update_file(f.file_id, forge_status="skipped")
-                continue
-            await current_store.update_file(f.file_id, forge_status="queued")
+            if file_type in ("skip", "code"):
+                rag_st = "skipped" if file_type == "code" else "pending"
+                await current_store.update_file(f.file_id, external_status="skipped", rag_status=rag_st)
+            else:
+                await current_store.update_file(f.file_id, external_status="queued")
+
+        asyncio.create_task(_safe_process(_maybe_close_job(job.job_id, current_store)))
 
         return {"job_id": job.job_id, "status": "processing", "file_count": len(parsed["files"])}
 
     @app.post("/callback/forge")
-    async def forge_callback(file_id: str, request: Request):
+    async def forge_callback(request: Request):
         body = await request.json()
-        forge_job_id = body.get("job_id", "")
+        external_job_id = body.get("job_id", "")
         asyncio.create_task(_safe_process(
             advance_pipeline(
-                forge_job_id=forge_job_id,
+                external_job_id=external_job_id,
                 callback_body=body,
+                store=request.app.state.store,
+                lightrag=request.app.state.lightrag,
+            )
+        ))
+        return {"received": True}
+
+    @app.post("/callback/citadel")
+    async def citadel_callback(request: Request):
+        body = await request.json()
+        rdoc_job_id = body.get("rdoc_job_id", "")
+        normalized = {
+            "status": body.get("status"),
+            "result": {"text": body.get("content", "")},
+            "error": body.get("error"),
+        }
+        asyncio.create_task(_safe_process(
+            advance_pipeline(
+                external_job_id=rdoc_job_id,
+                callback_body=normalized,
                 store=request.app.state.store,
                 lightrag=request.app.state.lightrag,
             )
@@ -116,9 +147,23 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         for file_path in files:
             file_type = classify_file(file_path)
             f = await current_store.create_file(job_id=job.job_id, file_path=file_path, file_type=file_type)
-            if file_type == "skip":
-                await current_store.update_file(f.file_id, forge_status="skipped")
+            if file_type in ("skip", "code"):
+                rag_st = "skipped" if file_type == "code" else "pending"
+                await current_store.update_file(f.file_id, external_status="skipped", rag_status=rag_st)
+            else:
+                await current_store.update_file(f.file_id, external_status="queued")
+        asyncio.create_task(_safe_process(_maybe_close_job(job.job_id, current_store)))
         return {"job_id": job.job_id, "status": "processing", "file_count": len(files)}
+
+    @app.post("/ingest/graphify-rebuild")
+    async def graphify_rebuild(request: Request):
+        nexus = request.app.state.nexus
+        try:
+            result = await nexus.rebuild()
+            return result
+        except Exception as e:
+            logger.error("Nexus rebuild failed: %s", e)
+            raise HTTPException(status_code=502, detail=f"Nexus rebuild failed: {e}")
 
     @app.get("/openapi-all.json", include_in_schema=False)
     async def openapi_all(request: Request):
@@ -141,5 +186,6 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         return merged
 
     return app
+
 
 app = create_app()

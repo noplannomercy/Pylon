@@ -14,18 +14,18 @@ CREATE TABLE IF NOT EXISTS ingestion_job (
 );
 
 CREATE TABLE IF NOT EXISTS ingestion_file (
-    file_id        UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    job_id         UUID NOT NULL REFERENCES ingestion_job(job_id),
-    file_path      TEXT NOT NULL,
-    file_type      TEXT NOT NULL,
-    forge_job_id   TEXT,
-    forge_status   TEXT NOT NULL DEFAULT 'queued',
-    rag_status     TEXT NOT NULL DEFAULT 'pending',
-    review_status  TEXT NOT NULL DEFAULT 'auto_approved',
-    error          TEXT,
-    created_at     TIMESTAMPTZ DEFAULT now(),
-    completed_at   TIMESTAMPTZ
+    file_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id          UUID NOT NULL REFERENCES ingestion_job(job_id),
+    file_path       TEXT NOT NULL,
+    file_type       TEXT NOT NULL,
+    external_job_id TEXT,
+    external_status TEXT NOT NULL DEFAULT 'queued',
+    rag_status      TEXT NOT NULL DEFAULT 'pending',
+    review_status   TEXT NOT NULL DEFAULT 'auto_approved',
+    error           TEXT,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    completed_at    TIMESTAMPTZ
 );
 
 CREATE INDEX IF NOT EXISTS idx_ingestion_file_job_id ON ingestion_file(job_id);
-CREATE INDEX IF NOT EXISTS idx_ingestion_file_forge_job_id ON ingestion_file(forge_job_id);
+CREATE INDEX IF NOT EXISTS idx_ingestion_file_external_job_id ON ingestion_file(external_job_id);
