@@ -57,7 +57,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         if hasattr(a.state, "pool"):
             await a.state.pool.close()
 
-    app = FastAPI(title="HCS Ingestion Router", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Pylon", version="0.2.0", lifespan=lifespan)
     app.state.store = store
     app.state.config = config
     app.state.forge = None

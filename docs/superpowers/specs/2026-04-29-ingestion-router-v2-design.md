@@ -71,9 +71,18 @@
 
 > Graphify는 시스템 외부에서 수동 배치로 실행. ingestion-router는 skip 기록만 담당.
 
+**`_maybe_close_job()` 수정 사항:**
+- `rag_terminal`에 `'skipped'` 추가 → `{"ingested", "failed", "pending", "skipped"}`
+- success count 로직에 `file_type == 'code'` 포함 → `f.rag_status == "ingested" or f.file_type in ("skip", "code")`
+
 ### 3.4 all-skip 버그 수정
 
 webhook/bulk에서 모든 파일이 skip인 경우 `_maybe_close_job()`이 호출되지 않던 버그를 코드 파일 경로 추가와 함께 수정한다.
+
+**수정 위치 (app.py):**
+- `webhook_bitbucket`: skip/code 파일 처리 루프 종료 후 `_maybe_close_job()` 호출
+- `ingest_bulk`: 동일하게 루프 종료 후 `_maybe_close_job()` 호출
+- 두 핸들러 모두 수정 필수 — webhook만 고치면 bulk는 여전히 버그 잔존
 
 ---
 
@@ -142,8 +151,8 @@ NEXUS_API_KEY=                       # 선택
 | 파일 | 변경 내용 |
 |------|-----------|
 | `config.py` | `CITADEL_URL`, `NEXUS_URL`, `CITADEL_API_KEY`, `NEXUS_API_KEY` 추가 |
-| `ingest.py` | `classify_file()` code 타입 추가, `CitadelClient` 추가, `advance_pipeline()` Citadel/code 분기 |
-| `app.py` | `POST /callback/citadel`, `POST /ingest/graphify-rebuild` 추가 |
+| `ingest.py` | `classify_file()` code 타입 추가, `CitadelClient` 추가, `advance_pipeline()` Citadel/code 분기, `ForgeClient.convert()` plsql 분기 제거 |
+| `app.py` | `POST /callback/citadel`, `POST /ingest/graphify-rebuild` 추가, `/callback/forge`의 dead `file_id` 쿼리 파라미터 제거, all-skip 버그 수정 (webhook + bulk) |
 | `job_store.py` | `forge_job_id` → `external_job_id`, `forge_status` → `external_status`, `get_file_by_forge_job_id()` → `get_file_by_external_job_id()` |
 | `schema.sql` | 컬럼명 변경, 인덱스명 변경 |
 | `models.py` | `IngestionFile` 필드명 변경 |
@@ -165,11 +174,26 @@ NEXUS_API_KEY=                       # 선택
 
 ## 9. 테스트 범위
 
-- `classify_file()` — code 타입 분기 확인
-- `POST /callback/citadel` — completed/failed 양 케이스
-- `POST /ingest/graphify-rebuild` — Nexus 호출 확인
-- all-skip job 자동 완료 버그 회귀 테스트
-- 필드명 변경 반영 전체 테스트 통과
+### CRITICAL (regression)
+- `test_pipeline.py` — code 파일 포함 job에서 `_maybe_close_job()` 완료 확인 (`rag_status='skipped'` 처리)
+- `test_pipeline.py` — all-skip job (skip + code 혼합) 자동 완료 확인
+
+### 신규 경로
+- `test_ingest.py` — `classify_file('Main.java')` → `'code'`
+- `test_ingest.py` — `classify_file('index.ts')` → `'code'`
+- `test_ingest.py` — `CitadelClient.submit()` 성공 케이스 (mocked httpx)
+- `test_ingest.py` — `CitadelClient.submit()` HTTP 실패 케이스
+- `test_pipeline.py` — Citadel 콜백 completed → LightRAG ingest
+- `test_pipeline.py` — Citadel 콜백 failed → external_status='failed'
+- `test_app.py` — `POST /callback/citadel` completed 케이스
+- `test_app.py` — `POST /callback/citadel` failed 케이스
+- `test_app.py` — `POST /callback/citadel` 알 수 없는 rdoc_job_id → 404
+- `test_app.py` — `POST /ingest/graphify-rebuild` Nexus 성공
+- `test_app.py` — `POST /ingest/graphify-rebuild` Nexus 실패 → 에러 전달
+- `test_app.py` — webhook all-skip job 자동 완료 확인
+
+### 기존 유지
+- 필드명 변경(`external_job_id`, `external_status`) 반영 전체 테스트 통과 확인
 
 ---
 

@@ -8,7 +8,7 @@
 
 # 개요
 
-HCS Ingestion Router는 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) / Forge(문서) / skip(코드·기타) 파이프라인을 구동하고 전 단계 상태를 추적하는 FastAPI 오케스트레이터 서비스다. 포트 8001.
+Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) / Forge(문서) / skip(코드·기타) 파이프라인을 구동하고 전 단계 상태를 추적하는 FastAPI 오케스트레이터 서비스다. 포트 8001.
 
 ---
 

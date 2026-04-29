@@ -1,4 +1,4 @@
--- HCS Ingestion Router schema (idempotent)
+-- Pylon schema (idempotent)
 
 CREATE TABLE IF NOT EXISTS ingestion_job (
     job_id       UUID PRIMARY KEY DEFAULT gen_random_uuid(),
