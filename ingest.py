@@ -107,9 +107,12 @@ class NexusClient:
 
 class LightRAGClient:
     def __init__(self, base_url: str, api_key: str):
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(
             base_url=base_url,
-            headers={"Authorization": f"Bearer {api_key}"},
+            headers=headers,
             timeout=60.0,
         )
 
