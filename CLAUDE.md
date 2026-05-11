@@ -20,6 +20,7 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 | C2 | JobStore 인터페이스를 우회하여 dict에 직접 접근 금지 | PostgresJobStore 전환 시 코드 변경 최소화. |
 | C3 | API 키, 시크릿 하드코딩 금지 | `.env` 또는 환경변수. config.py의 pydantic-settings로 관리. |
 | C4 | Citadel/Forge 콜백은 `external_job_id` 기준으로만 파일 역조회 | file_id는 내부 식별자, external_job_id가 외부 연결 키. |
+| C5 | Docker 컨테이너 내 `localhost`는 컨테이너 자신 | .env의 NEXUS_URL/CITADEL_URL을 서버 IP로 설정해야 라우팅됨. `docker restart`는 .env 미반영 — `docker compose up -d --force-recreate` 사용. |
 
 ---
 
@@ -121,8 +122,8 @@ curl http://localhost:8001/health/all
 ```
 LIGHTRAG_URL=http://193.168.195.222:9621
 FORGE_URL=http://193.168.195.222:8003
-CITADEL_URL=http://localhost:8004
-NEXUS_URL=http://localhost:8005
+CITADEL_URL=http://localhost:8004         # Citadel이 같은 호스트에 있으면 host network 또는 서버 IP 사용
+NEXUS_URL=http://193.168.195.222:8005   # Docker 컨테이너 내에서 localhost는 컨테이너 자신 → 서버 IP 필요
 SELF_URL=http://localhost:8001
 DATABASE_URL=                        # 비워두면 InMemory, 설정 시 Postgres 자동 전환
 BITBUCKET_WEBHOOK_SECRET=            # HMAC 검증용
