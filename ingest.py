@@ -82,11 +82,19 @@ class NexusClient:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers=headers,
-            timeout=30.0,
+            timeout=120.0,
         )
 
     async def rebuild(self) -> dict:
         resp = await self._client.post("/rebuild/")
+        resp.raise_for_status()
+        return resp.json()
+
+    async def upload(self, file_bytes: bytes, file_name: str) -> dict:
+        resp = await self._client.post(
+            "/rebuild/upload",
+            files={"file": (file_name, file_bytes, "application/octet-stream")},
+        )
         resp.raise_for_status()
         return resp.json()
 
@@ -145,6 +153,17 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
         await store.update_file(f.file_id, rag_status="failed", error=str(e))
 
     await _maybe_close_job(f.job_id, store)
+
+
+async def dispatch_code_file(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, nexus: NexusClient):
+    try:
+        await nexus.upload(file_bytes, file_name)
+        await store.update_file(file_id, external_status="done", rag_status="skipped",
+                                completed_at=datetime.now(timezone.utc))
+    except Exception as e:
+        logger.error("Nexus upload failed for %s: %s", file_name, e)
+        await store.update_file(file_id, external_status="failed", error=str(e))
+    await _maybe_close_job(job_id, store)
 
 
 async def _maybe_close_job(job_id: str, store):

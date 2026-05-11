@@ -5,10 +5,10 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
 from config import Config
-from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job
+from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_code_file
 from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
@@ -107,11 +107,16 @@ def create_app(store=None, config: Config = None) -> FastAPI:
     @app.post("/callback/forge")
     async def forge_callback(request: Request):
         body = await request.json()
-        external_job_id = body.get("job_id", "")
+        external_job_id = body.get("forge_job_id") or body.get("job_id", "")
+        normalized = {
+            "status": body.get("forge_status") or body.get("status"),
+            "result": {"text": body.get("content", "")},
+            "error": body.get("forge_error") or body.get("error"),
+        }
         asyncio.create_task(_safe_process(
             advance_pipeline(
                 external_job_id=external_job_id,
-                callback_body=body,
+                callback_body=normalized,
                 store=request.app.state.store,
                 lightrag=request.app.state.lightrag,
             )
@@ -153,6 +158,51 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             else:
                 await current_store.update_file(f.file_id, external_status="queued")
         asyncio.create_task(_safe_process(_maybe_close_job(job.job_id, current_store)))
+        return {"job_id": job.job_id, "status": "processing", "file_count": len(files)}
+
+    @app.post("/ingest/upload", status_code=202)
+    async def ingest_upload(request: Request, files: list[UploadFile] = File(...)):
+        store = request.app.state.store
+        nexus = request.app.state.nexus
+        forge = request.app.state.forge
+        citadel = request.app.state.citadel
+        config = request.app.state.config
+
+        job = await store.create_job(source_type="upload")
+        await store.update_job(job.job_id, status="processing", file_count=len(files))
+
+        for uf in files:
+            file_bytes = await uf.read()
+            file_name = uf.filename or ""
+            file_type = classify_file(file_name)
+            f = await store.create_file(job_id=job.job_id, file_path=file_name, file_type=file_type)
+
+            if file_type == "skip":
+                await store.update_file(f.file_id, external_status="skipped", rag_status="pending")
+            elif file_type == "code":
+                asyncio.create_task(_safe_process(
+                    dispatch_code_file(f.file_id, job.job_id, file_bytes, file_name, store, nexus)
+                ))
+            elif file_type == "plsql":
+                callback_url = f"{config.self_url}/callback/citadel"
+                try:
+                    result = await citadel.submit(file_bytes, file_name, callback_url)
+                    ext_id = result.get("rdoc_job_id") or result.get("job_id", "")
+                    await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
+                except Exception as e:
+                    logger.error("Citadel submit failed for %s: %s", file_name, e)
+                    await store.update_file(f.file_id, external_status="failed", error=str(e))
+            elif file_type == "document":
+                callback_url = f"{config.self_url}/callback/forge"
+                try:
+                    result = await forge.convert(file_bytes, file_name, callback_url)
+                    ext_id = result.get("job_id", "")
+                    await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
+                except Exception as e:
+                    logger.error("Forge convert failed for %s: %s", file_name, e)
+                    await store.update_file(f.file_id, external_status="failed", error=str(e))
+
+        asyncio.create_task(_safe_process(_maybe_close_job(job.job_id, store)))
         return {"job_id": job.job_id, "status": "processing", "file_count": len(files)}
 
     @app.post("/ingest/graphify-rebuild")

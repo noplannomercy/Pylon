@@ -168,6 +168,50 @@ async def test_graphify_rebuild(app_instance, test_config):
     await app_instance.state.nexus.close()
 
 @pytest.mark.asyncio
+async def test_ingest_upload_code_dispatches_to_nexus(app_instance, test_config):
+    """코드 파일 업로드 → Nexus /rebuild/upload 호출 → job completed."""
+    import asyncio
+    import respx
+    import httpx
+    from ingest import NexusClient
+    app_instance.state.nexus = NexusClient(base_url=test_config.nexus_url, api_key=test_config.nexus_api_key)
+
+    async with respx.mock:
+        respx.post("http://nexus:8005/rebuild/upload").mock(
+            return_value=httpx.Response(200, json={"status": "ok", "nodes": 100, "edges": 200})
+        )
+        async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
+            resp = await client.post(
+                "/ingest/upload",
+                files=[("files", ("Main.java", b"public class Main {}", "text/plain"))],
+            )
+        assert resp.status_code == 202
+        data = resp.json()
+        assert "job_id" in data
+        assert data["file_count"] == 1
+
+        await asyncio.sleep(0.1)
+
+    job = await app_instance.state.store.get_job(data["job_id"])
+    assert job.status == "completed"
+    await app_instance.state.nexus.close()
+
+@pytest.mark.asyncio
+async def test_ingest_upload_skip_file(app_instance):
+    """skip 파일 업로드 → job 즉시 completed."""
+    import asyncio
+    async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
+        resp = await client.post(
+            "/ingest/upload",
+            files=[("files", ("image.png", b"\x89PNG", "image/png"))],
+        )
+    assert resp.status_code == 202
+    await asyncio.sleep(0.05)
+    data = resp.json()
+    job = await app_instance.state.store.get_job(data["job_id"])
+    assert job.status == "completed"
+
+@pytest.mark.asyncio
 async def test_webhook_all_skip_completes_job(app_instance):
     """모든 파일이 skip/code인 webhook job이 자동으로 completed 처리되는지 검증."""
     payload = json.dumps({

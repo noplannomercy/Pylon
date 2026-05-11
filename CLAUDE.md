@@ -39,9 +39,9 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 
 | 경로 | 역할 |
 |------|------|
-| `app.py` | FastAPI 엔트리포인트 + lifespan + webhook/callback/bulk/graphify-rebuild/openapi-all 라우트 |
+| `app.py` | FastAPI 엔트리포인트 + lifespan + webhook/callback/bulk/upload/graphify-rebuild/openapi-all 라우트 |
 | `admin.py` | 모니터링 API (GET /jobs, /files, /stats, /health/all, POST /reject, /re-ingest, /retry) |
-| `ingest.py` | ForgeClient, CitadelClient, NexusClient, LightRAGClient, classify_file, advance_pipeline, _maybe_close_job |
+| `ingest.py` | ForgeClient, CitadelClient, NexusClient, LightRAGClient, classify_file, advance_pipeline, dispatch_code_file, _maybe_close_job |
 | `webhook.py` | HMAC 검증 + Bitbucket payload 파싱 (HCS 환경 확인 후 이 파일만 수정) |
 | `job_store.py` | InMemoryJobStore + PostgresJobStore (DATABASE_URL 있으면 자동 전환) |
 | `config.py` | 환경변수 로드 |
@@ -57,8 +57,9 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 확장자                           file_type   라우팅
 .pkb .pks .sql .prc .fnc     →  plsql      Citadel POST /jobs
 .pdf .docx .pptx .xlsx .md   →  document   Forge POST /convert
-.java .js .ts .jsx .tsx .py  →  code       skip (DB 기록만, external_status/rag_status='skipped')
-그 외                         →  skip       skip
+.java .js .ts .jsx .tsx .py  →  code       /ingest/upload → Nexus POST /rebuild/upload
+                                            /webhook/bulk → skipped (파일 bytes 없음)
+그 외                         →  skip       skipped 기록만
 ```
 
 ---
@@ -66,16 +67,19 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 # 파이프라인 흐름
 
 ```
-Bitbucket PR Merge
-  → POST /webhook/bitbucket (HMAC 검증 → payload 파싱 → job/file 생성)
-  → Bitbucket API로 파일 bytes fetch  ← [미구현]
-  → plsql: CitadelClient.submit()    ← [미구현]
-  → document: ForgeClient.convert()  ← [미구현]
-  → plsql  → POST /callback/citadel 수신 → advance_pipeline() → LightRAG ingest
-  → document → POST /callback/forge 수신  → advance_pipeline() → LightRAG ingest
-  → code   → skipped 기록만 (Graphify는 사람이 직접 돌린 뒤 POST /ingest/graphify-rebuild)
-  → skip   → skipped 기록만
+[직접 파일 업로드] POST /ingest/upload (multipart files)
+  → 파일별 classify_file()
+  → code    → dispatch_code_file() async → Nexus POST /rebuild/upload → 그래프 갱신
+  → plsql   → CitadelClient.submit() → POST /callback/citadel 수신 → advance_pipeline() → LightRAG
+  → document → ForgeClient.convert() → POST /callback/forge 수신  → advance_pipeline() → LightRAG
+  → skip    → skipped 기록만
   → _maybe_close_job() → job status 완료 처리
+
+[Bitbucket Webhook] POST /webhook/bitbucket (HMAC 검증 → payload 파싱 → 파일 경로만 수신)
+  → Bitbucket API로 파일 bytes fetch  ← [미구현]
+  → plsql/document: submit() 미호출   ← [미구현]
+  → code/skip: skipped 기록만 (bytes 없음)
+  → _maybe_close_job()
 ```
 
 ---
@@ -85,7 +89,7 @@ Bitbucket PR Merge
 | # | 항목 | 비고 |
 |---|------|------|
 | 🔴 1 | **Bitbucket 파일 bytes fetch** | Bitbucket API 클라이언트 미구현 |
-| 🔴 2 | **Citadel/Forge 실제 호출** | webhook/bulk에서 파일 생성 후 submit() 미호출 → external_job_id가 null로 남음 → 콜백 매칭 불가 → job이 processing에서 영원히 대기 |
+| 🔴 2 | **Citadel/Forge 실제 호출 (webhook/bulk)** | /ingest/upload는 완료. webhook/bulk는 Bitbucket bytes fetch 미구현으로 여전히 skipped 처리 |
 | 🟡 3 | **PostgreSQL 연결** | `.env`에 `DATABASE_URL` 추가만 하면 됨 (코드 준비됨) |
 | 🟡 4 | **Admin 인증** | 현재 모든 admin 엔드포인트 인증 없음 |
 | 🟡 5 | **docker-compose.yml** | Dockerfile은 있음 |
@@ -99,7 +103,7 @@ Bitbucket PR Merge
 ```bash
 # 테스트 전체 통과
 python -m pytest tests/ -v
-# 예상: 39 passed
+# 예상: 42 passed
 
 # 서버 기동 확인
 uvicorn app:app --port 8001

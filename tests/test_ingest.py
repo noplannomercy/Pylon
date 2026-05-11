@@ -79,6 +79,20 @@ async def test_citadel_submit_http_error():
     await client.close()
 
 @pytest.mark.asyncio
+async def test_nexus_upload_success():
+    from ingest import NexusClient
+    client = NexusClient(base_url="http://nexus:8005", api_key="test-key")
+    mock_resp = MagicMock()
+    mock_resp.raise_for_status = MagicMock()
+    mock_resp.json = MagicMock(return_value={"status": "ok", "nodes": 100, "edges": 200})
+    with patch.object(client._client, "post", new=AsyncMock(return_value=mock_resp)) as mock_post:
+        result = await client.upload(b"public class Main {}", "Main.java")
+        assert mock_post.call_args[0][0] == "/rebuild/upload"
+    assert result["status"] == "ok"
+    assert result["nodes"] == 100
+    await client.close()
+
+@pytest.mark.asyncio
 async def test_nexus_rebuild_success():
     from ingest import NexusClient
     client = NexusClient(base_url="http://nexus:8005", api_key="test-key")
