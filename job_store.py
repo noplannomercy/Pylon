@@ -54,6 +54,9 @@ class InMemoryJobStore:
                 return f
         return None
 
+    async def get_files_by_external_job_id(self, external_job_id: str) -> list[IngestionFile]:
+        return [f for f in self._files.values() if f.external_job_id == external_job_id]
+
     async def update_file(self, file_id: str, **kwargs) -> Optional[IngestionFile]:
         f = self._files.get(file_id)
         if f is None:
@@ -144,6 +147,11 @@ class PostgresJobStore:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM ingestion_file WHERE external_job_id = $1", external_job_id)
         return IngestionFile(**dict(row)) if row else None
+
+    async def get_files_by_external_job_id(self, external_job_id: str) -> list[IngestionFile]:
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch("SELECT * FROM ingestion_file WHERE external_job_id = $1", external_job_id)
+        return [IngestionFile(**dict(r)) for r in rows]
 
     async def update_file(self, file_id: str, **kwargs) -> Optional[IngestionFile]:
         if not kwargs:

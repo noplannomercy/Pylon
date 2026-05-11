@@ -117,9 +117,10 @@ class LightRAGClient:
         )
 
     async def ingest_text(self, content: str, metadata: dict) -> dict:
+        safe_content = content.encode("utf-8", errors="replace").decode("utf-8")
         resp = await self._client.post(
             "/documents/text",
-            json={"text": content, "metadata": metadata},
+            json={"text": safe_content, "file_source": metadata.get("file_path", "")},
         )
         resp.raise_for_status()
         return resp.json()
@@ -129,36 +130,51 @@ class LightRAGClient:
 
 
 async def advance_pipeline(external_job_id: str, callback_body: dict, store, lightrag: LightRAGClient):
-    f = await store.get_file_by_external_job_id(external_job_id)
-    if f is None:
+    files = await store.get_files_by_external_job_id(external_job_id)
+    if not files:
         logger.warning("Unknown external_job_id in callback: %s", external_job_id)
         return
 
-    if callback_body.get("status") != "completed":
-        error_msg = callback_body.get("error", "processing failed")
-        await store.update_file(f.file_id, external_status="failed", error=error_msg)
-        await _maybe_close_job(f.job_id, store)
-        return
-
-    await store.update_file(f.file_id, external_status="done", rag_status="ingesting")
-
     result_text = (callback_body.get("result") or {}).get("text", "")
-    try:
-        await lightrag.ingest_text(
-            content=result_text,
-            metadata={
-                "file_id": f.file_id,
-                "job_id": f.job_id,
-                "file_path": f.file_path,
-                "external_job_id": external_job_id,
-            },
-        )
-        await store.update_file(f.file_id, rag_status="ingested", completed_at=datetime.now(timezone.utc))
-    except Exception as e:
-        logger.error("LightRAG ingest failed for file %s: %s", f.file_id, e)
-        await store.update_file(f.file_id, rag_status="failed", error=str(e))
 
-    await _maybe_close_job(f.job_id, store)
+    affected_jobs = set()
+    for f in files:
+        if f.external_status not in ("queued", "processing"):
+            continue
+
+        if callback_body.get("status") != "completed":
+            error_msg = callback_body.get("error", "processing failed")
+            await store.update_file(f.file_id, external_status="failed", error=error_msg)
+            affected_jobs.add(f.job_id)
+            continue
+
+        await store.update_file(f.file_id, external_status="done", rag_status="ingesting")
+
+        if not result_text:
+            logger.error("Empty result_text for file %s (external_job_id=%s)", f.file_id, external_job_id)
+            await store.update_file(f.file_id, rag_status="failed", error="empty result from upstream")
+            affected_jobs.add(f.job_id)
+            continue
+
+        try:
+            await lightrag.ingest_text(
+                content=result_text,
+                metadata={
+                    "file_id": f.file_id,
+                    "job_id": f.job_id,
+                    "file_path": f.file_path,
+                    "external_job_id": external_job_id,
+                },
+            )
+            await store.update_file(f.file_id, rag_status="ingested", completed_at=datetime.now(timezone.utc))
+        except Exception as e:
+            logger.error("LightRAG ingest failed for file %s: %s", f.file_id, e)
+            await store.update_file(f.file_id, rag_status="failed", error=str(e))
+
+        affected_jobs.add(f.job_id)
+
+    for job_id in affected_jobs:
+        await _maybe_close_job(job_id, store)
 
 
 async def dispatch_code_file(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, nexus: NexusClient):

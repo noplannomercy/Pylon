@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
 from config import Config
-from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_code_file, dispatch_text_doc
+from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_text_doc
 from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
@@ -110,7 +110,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         external_job_id = body.get("forge_job_id") or body.get("job_id", "")
         normalized = {
             "status": body.get("forge_status") or body.get("status"),
-            "result": {"text": body.get("content", "")},
+            "result": {"text": body.get("text") or body.get("content", "")},
             "error": body.get("forge_error") or body.get("error"),
         }
         asyncio.create_task(_safe_process(
@@ -129,7 +129,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         rdoc_job_id = body.get("rdoc_job_id", "")
         normalized = {
             "status": body.get("status"),
-            "result": {"text": body.get("content", "")},
+            "result": {"text": body.get("text") or body.get("content", "")},
             "error": body.get("error"),
         }
         asyncio.create_task(_safe_process(
@@ -177,12 +177,8 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             file_type = classify_file(file_name)
             f = await store.create_file(job_id=job.job_id, file_path=file_name, file_type=file_type)
 
-            if file_type == "skip":
-                await store.update_file(f.file_id, external_status="skipped", rag_status="pending")
-            elif file_type == "code":
-                asyncio.create_task(_safe_process(
-                    dispatch_code_file(f.file_id, job.job_id, file_bytes, file_name, store, nexus)
-                ))
+            if file_type in ("skip", "code"):
+                await store.update_file(f.file_id, external_status="skipped", rag_status="skipped")
             elif file_type == "text_doc":
                 asyncio.create_task(_safe_process(
                     dispatch_text_doc(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
