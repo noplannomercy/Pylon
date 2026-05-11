@@ -5,7 +5,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 PLSQL_EXTS = {".pkb", ".pks", ".sql", ".prc", ".fnc"}
-DOCUMENT_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".md", ".txt", ".hwpx"}
+DOCUMENT_EXTS = {".pdf", ".docx", ".pptx", ".xlsx", ".hwpx"}  # Forge 변환 필요 포맷
+TEXT_EXTS = {".md", ".txt"}                                     # 이미 텍스트 → LightRAG 직접
 CODE_EXTS = {".java", ".js", ".ts", ".jsx", ".tsx", ".py"}
 
 def classify_file(file_path: str) -> str:
@@ -16,6 +17,8 @@ def classify_file(file_path: str) -> str:
         return "plsql"
     if ext in DOCUMENT_EXTS:
         return "document"
+    if ext in TEXT_EXTS:
+        return "text_doc"
     if ext in CODE_EXTS:
         return "code"
     return "skip"
@@ -163,6 +166,21 @@ async def dispatch_code_file(file_id: str, job_id: str, file_bytes: bytes, file_
     except Exception as e:
         logger.error("Nexus upload failed for %s: %s", file_name, e)
         await store.update_file(file_id, external_status="failed", error=str(e))
+    await _maybe_close_job(job_id, store)
+
+
+async def dispatch_text_doc(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, lightrag: LightRAGClient):
+    try:
+        content = file_bytes.decode("utf-8", errors="replace")
+        await lightrag.ingest_text(
+            content=content,
+            metadata={"file_id": file_id, "job_id": job_id, "file_path": file_name},
+        )
+        await store.update_file(file_id, external_status="done", rag_status="ingested",
+                                completed_at=datetime.now(timezone.utc))
+    except Exception as e:
+        logger.error("Text doc ingest failed for %s: %s", file_name, e)
+        await store.update_file(file_id, external_status="failed", rag_status="failed", error=str(e))
     await _maybe_close_job(job_id, store)
 
 

@@ -14,7 +14,10 @@ def test_classify_document():
     assert classify_file("spec.docx") == "document"
     assert classify_file("slides.pptx") == "document"
     assert classify_file("data.xlsx") == "document"
-    assert classify_file("readme.md") == "document"
+
+def test_classify_text_doc():
+    assert classify_file("readme.md") == "text_doc"
+    assert classify_file("policy.txt") == "text_doc"
 
 def test_classify_skip():
     assert classify_file("image.png") == "skip"
