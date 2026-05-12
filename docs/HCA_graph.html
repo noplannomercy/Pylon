@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>graphify - graphify-out\graph.html</title>
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0f0f1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; display: flex; height: 100vh; overflow: hidden; }
+  #graph { flex: 1; }
+  #sidebar { width: 280px; background: #1a1a2e; border-left: 1px solid #2a2a4e; display: flex; flex-direction: column; overflow: hidden; }
+  #search-wrap { padding: 12px; border-bottom: 1px solid #2a2a4e; }
+  #search { width: 100%; background: #0f0f1a; border: 1px solid #3a3a5e; color: #e0e0e0; padding: 7px 10px; border-radius: 6px; font-size: 13px; outline: none; }
+  #search:focus { border-color: #4E79A7; }
+  #search-results { max-height: 140px; overflow-y: auto; padding: 4px 12px; border-bottom: 1px solid #2a2a4e; display: none; }
+  .search-item { padding: 4px 6px; cursor: pointer; border-radius: 4px; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .search-item:hover { background: #2a2a4e; }
+  #info-panel { padding: 14px; border-bottom: 1px solid #2a2a4e; min-height: 140px; }
+  #info-panel h3 { font-size: 13px; color: #aaa; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+  #info-content { font-size: 13px; color: #ccc; line-height: 1.6; }
+  #info-content .field { margin-bottom: 5px; }
+  #info-content .field b { color: #e0e0e0; }
+  #info-content .empty { color: #555; font-style: italic; }
+  .neighbor-link { display: block; padding: 2px 6px; margin: 2px 0; border-radius: 3px; cursor: pointer; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; border-left: 3px solid #333; }
+  .neighbor-link:hover { background: #2a2a4e; }
+  #neighbors-list { max-height: 160px; overflow-y: auto; margin-top: 4px; }
+  #legend-wrap { flex: 1; overflow-y: auto; padding: 12px; }
+  #legend-wrap h3 { font-size: 13px; color: #aaa; margin-bottom: 10px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .legend-item { display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer; border-radius: 4px; font-size: 12px; }
+  .legend-item:hover { background: #2a2a4e; padding-left: 4px; }
+  .legend-item.dimmed { opacity: 0.35; }
+  .legend-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+  .legend-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .legend-count { color: #666; font-size: 11px; }
+  #stats { padding: 10px 14px; border-top: 1px solid #2a2a4e; font-size: 11px; color: #555; }
+  #legend-controls { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; padding: 4px 0; }
+  #legend-controls label { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 12px; color: #aaa; user-select: none; }
+  #legend-controls label:hover { color: #e0e0e0; }
+  .legend-cb, #select-all-cb { appearance: none; -webkit-appearance: none; width: 14px; height: 14px; border: 1.5px solid #3a3a5e; border-radius: 3px; background: #0f0f1a; cursor: pointer; position: relative; flex-shrink: 0; }
+  .legend-cb:checked, #select-all-cb:checked { background: #4E79A7; border-color: #4E79A7; }
+  .legend-cb:checked::after, #select-all-cb:checked::after { content: ''; position: absolute; left: 3.5px; top: 1px; width: 4px; height: 7px; border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  #select-all-cb:indeterminate { background: #4E79A7; border-color: #4E79A7; }
+  #select-all-cb:indeterminate::after { content: ''; position: absolute; left: 2px; top: 5px; width: 8px; height: 2px; background: #fff; border: none; transform: none; }
+</style>
+</head>
+<body>
+<div id="graph"></div>
+<div id="sidebar">
+  <div id="search-wrap">
+    <input id="search" type="text" placeholder="Search nodes..." autocomplete="off">
+    <div id="search-results"></div>
+  </div>
+  <div id="info-panel">
+    <h3>Node Info</h3>
+    <div id="info-content"><span class="empty">Click a node to inspect it</span></div>
+  </div>
+  <div id="legend-wrap">
+    <h3>Communities</h3>
+    <div id="legend-controls">
+      <label><input type="checkbox" id="select-all-cb" checked onchange="toggleAllCommunities(!this.checked)">Select All</label>
+    </div>
+    <div id="legend"></div>
+  </div>
+  <div id="stats">45 nodes &middot; 66 edges &middot; 7 communities</div>
+</div>
+<script>
+const RAW_NODES = [{"id": "hcs_code2rule_poc2", "label": "HCS Code2Rule PoC2 \ud504\ub85c\uc81d\ud2b8", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 32.5, "font": {"size": 12, "color": "#ffffff"}, "title": "HCS Code2Rule PoC2 \ud504\ub85c\uc81d\ud2b8", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/CLAUDE.md", "file_type": "document", "degree": 9}, {"id": "gcore_legacy", "label": "GCore \ub808\uac70\uc2dc \ucf54\ub4dc\ubca0\uc774\uc2a4", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "GCore \ub808\uac70\uc2dc \ucf54\ub4dc\ubca0\uc774\uc2a4", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "forge_preprocessing_engine", "label": "Forge (\uc804\ucc98\ub9ac \uc5d4\uc9c4)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 22.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Forge (\uc804\ucc98\ub9ac \uc5d4\uc9c4)", "community": 4, "community_name": "Forge & ADR Decisions", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 5}, {"id": "document_parser", "label": "Document Parser", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 22.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Document Parser", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 5}, {"id": "reverse_doc_service", "label": "Reverse Doc Service", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 25.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Reverse Doc Service", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 6}, {"id": "graphify_tool", "label": "Graphify (Knowledge Graph \uc0dd\uc131 \ub3c4\uad6c)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Graphify (Knowledge Graph \uc0dd\uc131 \ub3c4\uad6c)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "lightrag_engine", "label": "LightRAG (\uc9c0\uc2dd\ud654 \uc5d4\uc9c4)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 40.0, "font": {"size": 12, "color": "#ffffff"}, "title": "LightRAG (\uc9c0\uc2dd\ud654 \uc5d4\uc9c4)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 12}, {"id": "ingestion_router", "label": "Ingestion Router (FastAPI)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 22.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Ingestion Router (FastAPI)", "community": 4, "community_name": "Forge & ADR Decisions", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 5}, {"id": "postgresql_data_layer", "label": "PostgreSQL (\ub2e8\uc77c \ub370\uc774\ud130 \ub808\uc774\uc5b4)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "PostgreSQL (\ub2e8\uc77c \ub370\uc774\ud130 \ub808\uc774\uc5b4)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "apache_age", "label": "Apache AGE (Graph Extension)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Apache AGE (Graph Extension)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 4}, {"id": "pgvector", "label": "pgvector (\ubca1\ud130 \uac80\uc0c9 Extension)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "pgvector (\ubca1\ud130 \uac80\uc0c9 Extension)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}, {"id": "chatbot_ui", "label": "Chatbot UI (Query Interface)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Chatbot UI (Query Interface)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "review_ui", "label": "Review UI (\uc778\uac04 \uac80\uc99d \ub300\uc2dc\ubcf4\ub4dc)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Review UI (\uc778\uac04 \uac80\uc99d \ub300\uc2dc\ubcf4\ub4dc)", "community": 3, "community_name": "Ingestion Pipeline", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}, {"id": "aws_bedrock", "label": "AWS Bedrock (LLM \ucd94\ub860)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 22.5, "font": {"size": 12, "color": "#ffffff"}, "title": "AWS Bedrock (LLM \ucd94\ub860)", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 5}, {"id": "s3_storage", "label": "AWS S3 (\uc6d0\ubcf8 \ud30c\uc77c \uc2a4\ub0c5\uc0f7 \uc800\uc7a5\uc18c)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "AWS S3 (\uc6d0\ubcf8 \ud30c\uc77c \uc2a4\ub0c5\uc0f7 \uc800\uc7a5\uc18c)", "community": 3, "community_name": "Ingestion Pipeline", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}, {"id": "bitbucket_webhook", "label": "Bitbucket (\ucf54\ub4dc \uc800\uc7a5\uc18c / Webhook \uc18c\uc2a4)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Bitbucket (\ucf54\ub4dc \uc800\uc7a5\uc18c / Webhook \uc18c\uc2a4)", "community": 3, "community_name": "Ingestion Pipeline", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "hca_code2rule_project", "label": "HCA Code2Rule \ud504\ub85c\uc81d\ud2b8", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "HCA Code2Rule \ud504\ub85c\uc81d\ud2b8", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 1}, {"id": "oracle_plsql", "label": "Oracle PL/SQL", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Oracle PL/SQL", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "architecture_v04", "label": "PoC2 \uc544\ud0a4\ud14d\ucc98 \ubb38\uc11c v0.4", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "PoC2 \uc544\ud0a4\ud14d\ucc98 \ubb38\uc11c v0.4", "community": 5, "community_name": "Architecture Docs", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 4}, {"id": "exec_summary_v11", "label": "PoC2 \ucd94\uc9c4 \ubc29\ud5a5 \uc694\uc57d v1.1", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "PoC2 \ucd94\uc9c4 \ubc29\ud5a5 \uc694\uc57d v1.1", "community": 5, "community_name": "Architecture Docs", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_ExecSummary_v1.1.md", "file_type": "document", "degree": 2}, {"id": "customer_action_plan_v01", "label": "\uace0\uac1d \uc561\uc158 \ud50c\ub79c v0.1", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 22.5, "font": {"size": 12, "color": "#ffffff"}, "title": "\uace0\uac1d \uc561\uc158 \ud50c\ub79c v0.1", "community": 6, "community_name": "Action Plan & History", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/05_\uace0\uac1d\uc561\uc158\ud50c\ub79c/HCS_Code2Rule_\uace0\uac1d_\uc561\uc158\ud50c\ub79c_v0.1.md", "file_type": "document", "degree": 5}, {"id": "history_log", "label": "\uc791\uc5c5 \ud788\uc2a4\ud1a0\ub9ac (HISTORY.md)", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "\uc791\uc5c5 \ud788\uc2a4\ud1a0\ub9ac (HISTORY.md)", "community": 6, "community_name": "Action Plan & History", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/HISTORY.md", "file_type": "document", "degree": 2}, {"id": "claude_md_project", "label": "\ud504\ub85c\uc81d\ud2b8 CLAUDE.md (\uc791\uc5c5 \uae30\uc900\uc11c)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "\ud504\ub85c\uc81d\ud2b8 CLAUDE.md (\uc791\uc5c5 \uae30\uc900\uc11c)", "community": 5, "community_name": "Architecture Docs", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/CLAUDE.md", "file_type": "document", "degree": 1}, {"id": "cortex_rag_platform", "label": "Cortex (\uc790\uccb4 RAG+Graph \ud50c\ub7ab\ud3fc)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Cortex (\uc790\uccb4 RAG+Graph \ud50c\ub7ab\ud3fc)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}, {"id": "dual_source_retrieval", "label": "Dual-source Retrieval (LightRAG+AGE \uc9c8\uc758 \uacb0\ud569)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Dual-source Retrieval (LightRAG+AGE \uc9c8\uc758 \uacb0\ud569)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 4}, {"id": "human_in_the_loop", "label": "Human-in-the-Loop (\uc778\uac04 \uac80\uc99d \ub8e8\ud504)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "Human-in-the-Loop (\uc778\uac04 \uac80\uc99d \ub8e8\ud504)", "community": 3, "community_name": "Ingestion Pipeline", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 4}, {"id": "risk_source_code_export", "label": "\ub9ac\uc2a4\ud06c: \uc18c\uc2a4\ucf54\ub4dc \uc678\ubd80 API \ubc18\ucd9c \uc815\ucc45 (Critical)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "\ub9ac\uc2a4\ud06c: \uc18c\uc2a4\ucf54\ub4dc \uc678\ubd80 API \ubc18\ucd9c \uc815\ucc45 (Critical)", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}, {"id": "risk_bedrock_contract", "label": "\ub9ac\uc2a4\ud06c: AWS Bedrock \uacc4\uc57d \uc0c1\ud0dc (High)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "\ub9ac\uc2a4\ud06c: AWS Bedrock \uacc4\uc57d \uc0c1\ud0dc (High)", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 1}, {"id": "p0_action_items", "label": "P0 \uc561\uc158 \uc544\uc774\ud15c (\ucc29\uc218 \uc120\uacb0 \uc870\uac74, \ub9c8\uac10 2026-05-23)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 20.0, "font": {"size": 12, "color": "#ffffff"}, "title": "P0 \uc561\uc158 \uc544\uc774\ud15c (\ucc29\uc218 \uc120\uacb0 \uc870\uac74, \ub9c8\uac10 2026-05-23)", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/05_\uace0\uac1d\uc561\uc158\ud50c\ub79c/HCS_Code2Rule_\uace0\uac1d_\uc561\uc158\ud50c\ub79c_v0.1.md", "file_type": "document", "degree": 4}, {"id": "p1_action_items", "label": "P1 \uc561\uc158 \uc544\uc774\ud15c (\ud488\uc9c8 \ud5a5\uc0c1 \ud56d\ubaa9, \ub9c8\uac10 2026-05-30)", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "P1 \uc561\uc158 \uc544\uc774\ud15c (\ud488\uc9c8 \ud5a5\uc0c1 \ud56d\ubaa9, \ub9c8\uac10 2026-05-30)", "community": 6, "community_name": "Action Plan & History", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/05_\uace0\uac1d\uc561\uc158\ud50c\ub79c/HCS_Code2Rule_\uace0\uac1d_\uc561\uc158\ud50c\ub79c_v0.1.md", "file_type": "document", "degree": 1}, {"id": "ingestion_pipeline", "label": "Ingestion \ud30c\uc774\ud504\ub77c\uc778 (\uc99d\ubd84+\ubc8c\ud06c)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "Ingestion \ud30c\uc774\ud504\ub77c\uc778 (\uc99d\ubd84+\ubc8c\ud06c)", "community": 3, "community_name": "Ingestion Pipeline", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 3}, {"id": "openwebui", "label": "OpenWebUI (\ucc57\ubd07 \uc9c8\uc758 \uc778\ud130\ud398\uc774\uc2a4)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "OpenWebUI (\ucc57\ubd07 \uc9c8\uc758 \uc778\ud130\ud398\uc774\uc2a4)", "community": 4, "community_name": "Forge & ADR Decisions", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/HISTORY.md", "file_type": "document", "degree": 2}, {"id": "second_demo", "label": "2\ucc28 \uc2dc\uc5f0 (2026-05-09)", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "2\ucc28 \uc2dc\uc5f0 (2026-05-09)", "community": 4, "community_name": "Forge & ADR Decisions", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/HISTORY.md", "file_type": "document", "degree": 3}, {"id": "adr_01_n8n_removal", "label": "ADR-01: n8n \uc81c\uac70 \uacb0\uc815", "color": {"background": "#59A14F", "border": "#59A14F", "highlight": {"background": "#ffffff", "border": "#59A14F"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "ADR-01: n8n \uc81c\uac70 \uacb0\uc815", "community": 4, "community_name": "Forge & ADR Decisions", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 1}, {"id": "adr_05_lightrag_adoption", "label": "ADR-05: Cortex\u2192LightRAG \uc804\ud658 \uacb0\uc815", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "ADR-05: Cortex\u2192LightRAG \uc804\ud658 \uacb0\uc815", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}, {"id": "docling", "label": "Docling (\ubb38\uc11c \ud30c\uc2f1 \ub77c\uc774\ube0c\ub7ec\ub9ac)", "color": {"background": "#F28E2B", "border": "#F28E2B", "highlight": {"background": "#ffffff", "border": "#F28E2B"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "Docling (\ubb38\uc11c \ud30c\uc2f1 \ub77c\uc774\ube0c\ub7ec\ub9ac)", "community": 1, "community_name": "AWS & Document Parsing", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 1}, {"id": "tree_sitter", "label": "tree-sitter (\ucf54\ub4dc \ud30c\uc2f1 \ub77c\uc774\ube0c\ub7ec\ub9ac)", "color": {"background": "#4E79A7", "border": "#4E79A7", "highlight": {"background": "#ffffff", "border": "#4E79A7"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "tree-sitter (\ucf54\ub4dc \ud30c\uc2f1 \ub77c\uc774\ube0c\ub7ec\ub9ac)", "community": 0, "community_name": "LightRAG & Knowledge Store", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 1}, {"id": "vpc_network_structure", "label": "VPC \ub124\ud2b8\uc6cc\ud06c \uad6c\uc870 (\ubcf4\uc548 \uc124\uacc4)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "VPC \ub124\ud2b8\uc6cc\ud06c \uad6c\uc870 (\ubcf4\uc548 \uc124\uacc4)", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 1}, {"id": "converted_architecture_doc", "label": "\uc544\ud0a4\ud14d\ucc98 \ubb38\uc11c \ubcc0\ud658\ubcf8 (docx\u2192md)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "\uc544\ud0a4\ud14d\ucc98 \ubb38\uc11c \ubcc0\ud658\ubcf8 (docx\u2192md)", "community": 5, "community_name": "Architecture Docs", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/graphify-out/converted/HCS_Code2Rule_PoC2_Architecture_v0.4_2713c254.md", "file_type": "document", "degree": 1}, {"id": "converted_exec_summary", "label": "\ucd94\uc9c4 \ubc29\ud5a5 \uc694\uc57d \ubcc0\ud658\ubcf8 (docx\u2192md)", "color": {"background": "#EDC948", "border": "#EDC948", "highlight": {"background": "#ffffff", "border": "#EDC948"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "\ucd94\uc9c4 \ubc29\ud5a5 \uc694\uc57d \ubcc0\ud658\ubcf8 (docx\u2192md)", "community": 5, "community_name": "Architecture Docs", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/graphify-out/converted/HCS_Code2Rule_PoC2_ExecSummary_v1.1_031998fe.md", "file_type": "document", "degree": 1}, {"id": "converted_action_plan", "label": "\uace0\uac1d \uc561\uc158 \ud50c\ub79c \ubcc0\ud658\ubcf8 (docx\u2192md)", "color": {"background": "#B07AA1", "border": "#B07AA1", "highlight": {"background": "#ffffff", "border": "#B07AA1"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "\uace0\uac1d \uc561\uc158 \ud50c\ub79c \ubcc0\ud658\ubcf8 (docx\u2192md)", "community": 6, "community_name": "Action Plan & History", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/graphify-out/converted/HCS_Code2Rule_\uace0\uac1d_\uc561\uc158\ud50c\ub79c_v0.1_cde29e07.md", "file_type": "document", "degree": 1}, {"id": "hcs_organization", "label": "HCS (\uace0\uac1d \uc870\uc9c1)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 17.5, "font": {"size": 12, "color": "#ffffff"}, "title": "HCS (\uace0\uac1d \uc870\uc9c1)", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/CLAUDE.md", "file_type": "document", "degree": 3}, {"id": "hae_organization", "label": "HAE (\ud504\ub85c\uc81d\ud2b8 \uc218\ud589 \uc870\uc9c1)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "HAE (\ud504\ub85c\uc81d\ud2b8 \uc218\ud589 \uc870\uc9c1)", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/CLAUDE.md", "file_type": "document", "degree": 1}, {"id": "pilot_completion_target", "label": "\ud30c\uc77c\ub7ff \uc644\ub8cc \ubaa9\ud45c (2026\ub144 11\uc6d4)", "color": {"background": "#E15759", "border": "#E15759", "highlight": {"background": "#ffffff", "border": "#E15759"}}, "size": 12.5, "font": {"size": 0, "color": "#ffffff"}, "title": "\ud30c\uc77c\ub7ff \uc644\ub8cc \ubaa9\ud45c (2026\ub144 11\uc6d4)", "community": 2, "community_name": "GCore Legacy & Project", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_ExecSummary_v1.1.md", "file_type": "document", "degree": 1}, {"id": "success_criteria", "label": "\uc131\uacf5 \uae30\uc900 (\uc628\ubcf4\ub529 80% + Unknown \uba85\uc2dc + \uc778\uac04 \uac80\uc99d)", "color": {"background": "#76B7B2", "border": "#76B7B2", "highlight": {"background": "#ffffff", "border": "#76B7B2"}}, "size": 15.0, "font": {"size": 12, "color": "#ffffff"}, "title": "\uc131\uacf5 \uae30\uc900 (\uc628\ubcf4\ub529 80% + Unknown \uba85\uc2dc + \uc778\uac04 \uac80\uc99d)", "community": 3, "community_name": "Ingestion Pipeline", "source_file": "C:/workspace/doc_root/HCA_Code2Rule/03_\uc2dc\uc2a4\ud15c\uc124\uacc4/HCS_Code2Rule_PoC2_Architecture_v0.4.md", "file_type": "document", "degree": 2}];
+const RAW_EDGES = [{"from": "hcs_code2rule_poc2", "to": "architecture_v04", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "customer_action_plan_v01", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "gcore_legacy", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "hca_code2rule_project", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "hcs_organization", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "hae_organization", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "success_criteria", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "pilot_completion_target", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "hcs_code2rule_poc2", "to": "vpc_network_structure", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "gcore_legacy", "to": "hcs_organization", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "gcore_legacy", "to": "oracle_plsql", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "forge_preprocessing_engine", "to": "document_parser", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "forge_preprocessing_engine", "to": "reverse_doc_service", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "forge_preprocessing_engine", "to": "graphify_tool", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "forge_preprocessing_engine", "to": "ingestion_router", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "forge_preprocessing_engine", "to": "second_demo", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "document_parser", "to": "lightrag_engine", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "document_parser", "to": "docling", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "document_parser", "to": "reverse_doc_service", "label": "conceptually_related_to", "title": "conceptually_related_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "document_parser", "to": "aws_bedrock", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "reverse_doc_service", "to": "lightrag_engine", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "reverse_doc_service", "to": "oracle_plsql", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "reverse_doc_service", "to": "aws_bedrock", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "reverse_doc_service", "to": "review_ui", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "graphify_tool", "to": "apache_age", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "graphify_tool", "to": "tree_sitter", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "ingestion_router", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "postgresql_data_layer", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "apache_age", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "pgvector", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "cortex_rag_platform", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "chatbot_ui", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "dual_source_retrieval", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "human_in_the_loop", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "adr_05_lightrag_adoption", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "lightrag_engine", "to": "aws_bedrock", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "ingestion_router", "to": "dual_source_retrieval", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "ingestion_router", "to": "bitbucket_webhook", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "ingestion_router", "to": "adr_01_n8n_removal", "label": "rationale_for", "title": "rationale_for [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "postgresql_data_layer", "to": "apache_age", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "postgresql_data_layer", "to": "pgvector", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "apache_age", "to": "dual_source_retrieval", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "chatbot_ui", "to": "dual_source_retrieval", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "chatbot_ui", "to": "openwebui", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "review_ui", "to": "human_in_the_loop", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "aws_bedrock", "to": "risk_source_code_export", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "aws_bedrock", "to": "risk_bedrock_contract", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "s3_storage", "to": "bitbucket_webhook", "label": "shares_data_with", "title": "shares_data_with [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "s3_storage", "to": "ingestion_pipeline", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "bitbucket_webhook", "to": "ingestion_pipeline", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "oracle_plsql", "to": "p0_action_items", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "architecture_v04", "to": "exec_summary_v11", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "architecture_v04", "to": "converted_architecture_doc", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "architecture_v04", "to": "claude_md_project", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "exec_summary_v11", "to": "converted_exec_summary", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "customer_action_plan_v01", "to": "p0_action_items", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "customer_action_plan_v01", "to": "p1_action_items", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "customer_action_plan_v01", "to": "history_log", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "customer_action_plan_v01", "to": "converted_action_plan", "label": "semantically_similar_to", "title": "semantically_similar_to [INFERRED]", "dashes": true, "width": 1, "color": {"opacity": 0.35}, "confidence": "INFERRED"}, {"from": "history_log", "to": "second_demo", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "cortex_rag_platform", "to": "adr_05_lightrag_adoption", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "human_in_the_loop", "to": "ingestion_pipeline", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "human_in_the_loop", "to": "success_criteria", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "risk_source_code_export", "to": "p0_action_items", "label": "conceptually_related_to", "title": "conceptually_related_to [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "p0_action_items", "to": "hcs_organization", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}, {"from": "openwebui", "to": "second_demo", "label": "references", "title": "references [EXTRACTED]", "dashes": false, "width": 2, "color": {"opacity": 0.7}, "confidence": "EXTRACTED"}];
+const LEGEND = [{"cid": 0, "color": "#4E79A7", "label": "LightRAG &amp; Knowledge Store", "count": 10}, {"cid": 1, "color": "#F28E2B", "label": "AWS &amp; Document Parsing", "count": 8}, {"cid": 2, "color": "#E15759", "label": "GCore Legacy &amp; Project", "count": 7}, {"cid": 3, "color": "#76B7B2", "label": "Ingestion Pipeline", "count": 6}, {"cid": 4, "color": "#59A14F", "label": "Forge &amp; ADR Decisions", "count": 5}, {"cid": 5, "color": "#EDC948", "label": "Architecture Docs", "count": 5}, {"cid": 6, "color": "#B07AA1", "label": "Action Plan &amp; History", "count": 4}];
+
+// HTML-escape helper — prevents XSS when injecting graph data into innerHTML
+function esc(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// Build vis datasets
+const nodesDS = new vis.DataSet(RAW_NODES.map(n => ({
+  id: n.id, label: n.label, color: n.color, size: n.size,
+  font: n.font, title: n.title,
+  _community: n.community, _community_name: n.community_name,
+  _source_file: n.source_file, _file_type: n.file_type, _degree: n.degree,
+})));
+
+const edgesDS = new vis.DataSet(RAW_EDGES.map((e, i) => ({
+  id: i, from: e.from, to: e.to,
+  label: '',
+  title: e.title,
+  dashes: e.dashes,
+  width: e.width,
+  color: e.color,
+  arrows: { to: { enabled: true, scaleFactor: 0.5 } },
+})));
+
+const container = document.getElementById('graph');
+const network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, {
+  physics: {
+    enabled: true,
+    solver: 'forceAtlas2Based',
+    forceAtlas2Based: {
+      gravitationalConstant: -60,
+      centralGravity: 0.005,
+      springLength: 120,
+      springConstant: 0.08,
+      damping: 0.4,
+      avoidOverlap: 0.8,
+    },
+    stabilization: { iterations: 200, fit: true },
+  },
+  interaction: {
+    hover: true,
+    tooltipDelay: 100,
+    hideEdgesOnDrag: true,
+    navigationButtons: false,
+    keyboard: false,
+  },
+  nodes: { shape: 'dot', borderWidth: 1.5 },
+  edges: { smooth: { type: 'continuous', roundness: 0.2 }, selectionWidth: 3 },
+});
+
+network.once('stabilizationIterationsDone', () => {
+  network.setOptions({ physics: { enabled: false } });
+});
+
+function showInfo(nodeId) {
+  const n = nodesDS.get(nodeId);
+  if (!n) return;
+  const neighborIds = network.getConnectedNodes(nodeId);
+  const neighborItems = neighborIds.map(nid => {
+    const nb = nodesDS.get(nid);
+    const color = nb ? nb.color.background : '#555';
+    return `<span class="neighbor-link" style="border-left-color:${esc(color)}" onclick="focusNode(${JSON.stringify(nid)})">${esc(nb ? nb.label : nid)}</span>`;
+  }).join('');
+  document.getElementById('info-content').innerHTML = `
+    <div class="field"><b>${esc(n.label)}</b></div>
+    <div class="field">Type: ${esc(n._file_type || 'unknown')}</div>
+    <div class="field">Community: ${esc(n._community_name)}</div>
+    <div class="field">Source: ${esc(n._source_file || '-')}</div>
+    <div class="field">Degree: ${n._degree}</div>
+    ${neighborIds.length ? `<div class="field" style="margin-top:8px;color:#aaa;font-size:11px">Neighbors (${neighborIds.length})</div><div id="neighbors-list">${neighborItems}</div>` : ''}
+  `;
+}
+
+function focusNode(nodeId) {
+  network.focus(nodeId, { scale: 1.4, animation: true });
+  network.selectNodes([nodeId]);
+  showInfo(nodeId);
+}
+
+// Track hovered node — hover detection is more reliable than click params
+let hoveredNodeId = null;
+network.on('hoverNode', params => {
+  hoveredNodeId = params.node;
+  container.style.cursor = 'pointer';
+});
+network.on('blurNode', () => {
+  hoveredNodeId = null;
+  container.style.cursor = 'default';
+});
+container.addEventListener('click', () => {
+  if (hoveredNodeId !== null) {
+    showInfo(hoveredNodeId);
+    network.selectNodes([hoveredNodeId]);
+  }
+});
+network.on('click', params => {
+  if (params.nodes.length > 0) {
+    showInfo(params.nodes[0]);
+  } else if (hoveredNodeId === null) {
+    document.getElementById('info-content').innerHTML = '<span class="empty">Click a node to inspect it</span>';
+  }
+});
+
+const searchInput = document.getElementById('search');
+const searchResults = document.getElementById('search-results');
+searchInput.addEventListener('input', () => {
+  const q = searchInput.value.toLowerCase().trim();
+  searchResults.innerHTML = '';
+  if (!q) { searchResults.style.display = 'none'; return; }
+  const matches = RAW_NODES.filter(n => n.label.toLowerCase().includes(q)).slice(0, 20);
+  if (!matches.length) { searchResults.style.display = 'none'; return; }
+  searchResults.style.display = 'block';
+  matches.forEach(n => {
+    const el = document.createElement('div');
+    el.className = 'search-item';
+    el.textContent = n.label;
+    el.style.borderLeft = `3px solid ${n.color.background}`;
+    el.style.paddingLeft = '8px';
+    el.onclick = () => {
+      network.focus(n.id, { scale: 1.5, animation: true });
+      network.selectNodes([n.id]);
+      showInfo(n.id);
+      searchResults.style.display = 'none';
+      searchInput.value = '';
+    };
+    searchResults.appendChild(el);
+  });
+});
+document.addEventListener('click', e => {
+  if (!searchResults.contains(e.target) && e.target !== searchInput)
+    searchResults.style.display = 'none';
+});
+
+const hiddenCommunities = new Set();
+
+const selectAllCb = document.getElementById('select-all-cb');
+
+function updateSelectAllState() {
+  const total = LEGEND.length;
+  const hidden = hiddenCommunities.size;
+  selectAllCb.checked = hidden === 0;
+  selectAllCb.indeterminate = hidden > 0 && hidden < total;
+}
+
+function toggleAllCommunities(hide) {
+  document.querySelectorAll('.legend-item').forEach(item => {
+    hide ? item.classList.add('dimmed') : item.classList.remove('dimmed');
+  });
+  document.querySelectorAll('.legend-cb').forEach(cb => {
+    cb.checked = !hide;
+  });
+  LEGEND.forEach(c => {
+    if (hide) hiddenCommunities.add(c.cid); else hiddenCommunities.delete(c.cid);
+  });
+  const updates = RAW_NODES.map(n => ({ id: n.id, hidden: hide }));
+  nodesDS.update(updates);
+  updateSelectAllState();
+}
+
+const legendEl = document.getElementById('legend');
+LEGEND.forEach(c => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  const cb = document.createElement('input');
+  cb.type = 'checkbox';
+  cb.className = 'legend-cb';
+  cb.checked = true;
+  cb.addEventListener('change', (e) => {
+    e.stopPropagation();
+    if (cb.checked) {
+      hiddenCommunities.delete(c.cid);
+      item.classList.remove('dimmed');
+    } else {
+      hiddenCommunities.add(c.cid);
+      item.classList.add('dimmed');
+    }
+    const updates = RAW_NODES
+      .filter(n => n.community === c.cid)
+      .map(n => ({ id: n.id, hidden: !cb.checked }));
+    nodesDS.update(updates);
+    updateSelectAllState();
+  });
+  item.innerHTML = `<div class="legend-dot" style="background:${c.color}"></div>
+    <span class="legend-label">${c.label}</span>
+    <span class="legend-count">${c.count}</span>`;
+  item.prepend(cb);
+  item.onclick = (e) => {
+    if (e.target === cb) return;
+    cb.checked = !cb.checked;
+    cb.dispatchEvent(new Event('change'));
+  };
+  legendEl.appendChild(item);
+});
+</script>
+<script>
+// Render hyperedges as shaded regions
+const hyperedges = [{"id": "hyperedge_forge_pipeline", "label": "Forge 3\ubd84\uae30 \ucc98\ub9ac \ud30c\uc774\ud504\ub77c\uc778", "participants": ["forge_preprocessing_engine", "document_parser", "reverse_doc_service", "graphify_tool"], "relation": "\ud30c\uc77c \uc720\ud615\ubcc4 \ubd84\uae30 \ucc98\ub9ac (\ubb38\uc11c\u2192Document Parser, PL/SQL\u2192Reverse Doc Service, \ucf54\ub4dc\u2192Graphify)", "source_file": "C:\\workspace\\doc_root\\HCA_Code2Rule\\03_\uc2dc\uc2a4\ud15c\uc124\uacc4\\HCS_Code2Rule_PoC2_Architecture_v0.4.md", "source_location": "\u00a74.2, \u00a74.3, ADR-10", "confidence": "EXTRACTED", "confidence_score": 1.0}, {"id": "hyperedge_knowledge_storage", "label": "PostgreSQL \ub2e8\uc77c \uc9c0\uc2dd \uc800\uc7a5\uc18c", "participants": ["postgresql_data_layer", "apache_age", "pgvector"], "relation": "\ub2e8\uc77c PostgreSQL \uc778\uc2a4\ud134\uc2a4\uc5d0 \ubca1\ud130(pgvector), \uadf8\ub798\ud504(AGE), \uad00\uacc4\ud615 \uba54\ud0c0\ub370\uc774\ud130 \ud1b5\ud569 \uc800\uc7a5", "source_file": "C:\\workspace\\doc_root\\HCA_Code2Rule\\03_\uc2dc\uc2a4\ud15c\uc124\uacc4\\HCS_Code2Rule_PoC2_Architecture_v0.4.md", "source_location": "\u00a74.5, ADR-07", "confidence": "EXTRACTED", "confidence_score": 1.0}, {"id": "hyperedge_query_context_merge", "label": "Dual-source \uc9c8\uc758 \ucee8\ud14d\uc2a4\ud2b8 \uacb0\ud569", "participants": ["dual_source_retrieval", "lightrag_engine", "apache_age"], "relation": "\uc9c8\uc758 \uc2dc LightRAG Hybrid Retrieval\uacfc Graphify AGE \uadf8\ub798\ud504 \uc9c8\uc758 \uacb0\uacfc\ub97c \uacb0\ud569\ud558\uc5ec \uc751\ub2f5 \uc0dd\uc131", "source_file": "C:\\workspace\\doc_root\\HCA_Code2Rule\\03_\uc2dc\uc2a4\ud15c\uc124\uacc4\\HCS_Code2Rule_PoC2_Architecture_v0.4.md", "source_location": "\u00a75.3, ADR-11", "confidence": "EXTRACTED", "confidence_score": 1.0}];
+// afterDrawing passes ctx already transformed to network coordinate space.
+// Draw node positions raw — no manual pan/zoom/DPR math needed.
+network.on('afterDrawing', function(ctx) {
+    hyperedges.forEach(h => {
+        const positions = h.nodes
+            .map(nid => network.getPositions([nid])[nid])
+            .filter(p => p !== undefined);
+        if (positions.length < 2) return;
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = '#6366f1';
+        ctx.strokeStyle = '#6366f1';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        // Centroid and expanded hull in network coordinates
+        const cx = positions.reduce((s, p) => s + p.x, 0) / positions.length;
+        const cy = positions.reduce((s, p) => s + p.y, 0) / positions.length;
+        const expanded = positions.map(p => ({
+            x: cx + (p.x - cx) * 1.15,
+            y: cy + (p.y - cy) * 1.15
+        }));
+        ctx.moveTo(expanded[0].x, expanded[0].y);
+        expanded.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 0.4;
+        ctx.stroke();
+        // Label
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = '#4f46e5';
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(h.label, cx, cy - 5);
+        ctx.restore();
+    });
+});
+</script>
+</body>
+</html>
