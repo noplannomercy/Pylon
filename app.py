@@ -13,6 +13,7 @@ from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
 
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
