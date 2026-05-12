@@ -67,6 +67,31 @@ curl -X POST http://193.168.195.222:8001/ingest/upload \
 
 ---
 
+### 2-4. 코드 파일 (.py) → Nexus (코드 지식 그래프)
+
+```bash
+curl -X POST "http://193.168.195.222:8001/ingest/upload?project_id=hca" \
+  -F "files=@docs/samples/hca_loan_eval.py"
+```
+
+**응답 예시:**
+```json
+{"job_id": "xxxx", "status": "processing", "file_count": 1}
+```
+
+**내부 흐름:** Pylon → Nexus `/rebuild/upload?project_id=hca` → graphify update → graph.json 갱신
+
+**완료 확인:**
+```bash
+curl http://193.168.195.222:8005/graph/stats?project_id=hca
+# → {"nodes": N, "edges": M}
+```
+
+**시각화:**
+브라우저: `http://193.168.195.222:8005/graph/html?project_id=hca`
+
+---
+
 ## Step 3. 처리 상태 확인
 
 ```bash
@@ -94,6 +119,7 @@ curl http://193.168.195.222:8001/jobs/{JOB_ID}
 | `.md` / `.txt` | 즉시 (~1초) |
 | `.docx` / `.pdf` | ~5초 (Forge 변환) |
 | `.pkb` / `.sql` | ~30~60초 (Robotics LLM) |
+| `.py` / `.java` | ~5~10초 (graphify update) |
 
 ---
 
@@ -126,6 +152,14 @@ curl http://193.168.195.222:8001/jobs/{JOB_ID}
 
 ## Step 5. (선택) Nexus 그래프 확인
 
+### 5-1. 브라우저 시각화
+
+브라우저 (Chrome 권장): **http://193.168.195.222:8005/graph/html**
+
+HCA 코드 지식 그래프 인터랙티브 뷰. 노드 클릭으로 관계 탐색.
+
+### 5-2. API 조회
+
 ```bash
 # HCA 코드 지식 그래프 통계
 curl http://193.168.195.222:8005/graph/stats
@@ -143,7 +177,7 @@ curl http://193.168.195.222:8005/graph/god-nodes
   .pkb/.sql  ──→ Robotics (LLM 역문서) ──→ callback ──→ LightRAG
   .md/.txt   ──────────────────────────────────────→ LightRAG
   .docx/.pdf ──→ Forge (텍스트 추출)   ──→ callback ──→ LightRAG
-  .py/.java  ──→ skipped (graphify CLI로 별도 분석)
+  .py/.java  ──→ Nexus (graphify update, project_id별 격리)
 
 조회
   LightRAG ──→ OWU (자연어 질의)

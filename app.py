@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
 from config import Config
-from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_text_doc
+from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_text_doc, dispatch_code_file
 from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
@@ -161,7 +161,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         return {"job_id": job.job_id, "status": "processing", "file_count": len(files)}
 
     @app.post("/ingest/upload", status_code=202)
-    async def ingest_upload(request: Request, files: list[UploadFile] = File(...)):
+    async def ingest_upload(request: Request, files: list[UploadFile] = File(...), project_id: str = "default"):
         store = request.app.state.store
         nexus = request.app.state.nexus
         forge = request.app.state.forge
@@ -177,8 +177,12 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             file_type = classify_file(file_name)
             f = await store.create_file(job_id=job.job_id, file_path=file_name, file_type=file_type)
 
-            if file_type in ("skip", "code"):
+            if file_type == "skip":
                 await store.update_file(f.file_id, external_status="skipped", rag_status="skipped")
+            elif file_type == "code":
+                asyncio.create_task(_safe_process(
+                    dispatch_code_file(f.file_id, job.job_id, file_bytes, file_name, store, nexus, project_id)
+                ))
             elif file_type == "text_doc":
                 asyncio.create_task(_safe_process(
                     dispatch_text_doc(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)

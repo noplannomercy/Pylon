@@ -94,7 +94,12 @@ def create_admin_router(app_state) -> APIRouter:
         results = {"ingestion_router": "ok"}
         config = getattr(app_state, "config", None)
         if config:
-            for name, url in [("forge", config.forge_url), ("lightrag", config.lightrag_url)]:
+            for name, url in [
+                ("forge", config.forge_url),
+                ("lightrag", config.lightrag_url),
+                ("citadel", config.citadel_url),
+                ("nexus", config.nexus_url),
+            ]:
                 try:
                     async with httpx.AsyncClient(timeout=5.0) as c:
                         r = await c.get(f"{url}/health")

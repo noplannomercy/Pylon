@@ -93,10 +93,11 @@ class NexusClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def upload(self, file_bytes: bytes, file_name: str) -> dict:
+    async def upload(self, file_bytes: bytes, file_name: str, project_id: str = "default") -> dict:
         resp = await self._client.post(
             "/rebuild/upload",
             files={"file": (file_name, file_bytes, "application/octet-stream")},
+            params={"project_id": project_id},
         )
         resp.raise_for_status()
         return resp.json()
@@ -177,9 +178,9 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
         await _maybe_close_job(job_id, store)
 
 
-async def dispatch_code_file(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, nexus: NexusClient):
+async def dispatch_code_file(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, nexus: NexusClient, project_id: str = "default"):
     try:
-        await nexus.upload(file_bytes, file_name)
+        await nexus.upload(file_bytes, file_name, project_id)
         await store.update_file(file_id, external_status="done", rag_status="skipped",
                                 completed_at=datetime.now(timezone.utc))
     except Exception as e:
