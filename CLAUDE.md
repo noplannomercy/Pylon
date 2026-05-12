@@ -2,7 +2,7 @@
 
 - 이 파일을 끝까지 읽은 뒤 작업을 시작할 것
 - `python -m pytest tests/ -v`로 현재 테스트 상태 확인 후 작업 시작
-- `.env`에 `LIGHTRAG_URL`, `FORGE_URL`, `CITADEL_URL`, `NEXUS_URL` 설정 확인
+- `.env`에 `LIGHTRAG_URL`, `FORGE_URL`, `CITADEL_URL`, `NEXUS_URL`, `SELF_URL` 설정 확인 — 모두 서버 IP 기반이어야 함 (localhost 금지)
 
 ---
 
@@ -20,7 +20,7 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 | C2 | JobStore 인터페이스를 우회하여 dict에 직접 접근 금지 | PostgresJobStore 전환 시 코드 변경 최소화. |
 | C3 | API 키, 시크릿 하드코딩 금지 | `.env` 또는 환경변수. config.py의 pydantic-settings로 관리. |
 | C4 | Citadel/Forge 콜백은 `external_job_id` 기준으로만 파일 역조회 | file_id는 내부 식별자, external_job_id가 외부 연결 키. |
-| C5 | Docker 컨테이너 내 `localhost`는 컨테이너 자신 | .env의 NEXUS_URL/CITADEL_URL을 서버 IP로 설정해야 라우팅됨. `docker restart`는 .env 미반영 — `docker compose up -d --force-recreate` 사용. |
+| C5 | Docker 컨테이너 내 `localhost`는 컨테이너 자신 | .env의 NEXUS_URL/CITADEL_URL/SELF_URL을 서버 IP로 설정해야 라우팅됨. SELF_URL이 localhost이면 Forge/Citadel callback이 컨테이너 자신으로 향해 실패. `docker restart`는 .env 미반영 — `docker compose up -d --force-recreate` 사용. |
 
 ---
 

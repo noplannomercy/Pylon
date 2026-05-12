@@ -16,6 +16,16 @@ from admin import create_admin_router
 logger = logging.getLogger(__name__)
 
 
+def _decode_filename(filename: str) -> str:
+    """Windows curl이 EUC-KR로 보낸 파일명을 Latin-1로 파싱한 경우 복원."""
+    for encoding in ("utf-8", "euc-kr"):
+        try:
+            return filename.encode("latin-1").decode(encoding)
+        except (UnicodeDecodeError, UnicodeEncodeError):
+            continue
+    return filename
+
+
 async def _safe_process(coro):
     try:
         await coro
@@ -173,7 +183,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
 
         for uf in files:
             file_bytes = await uf.read()
-            file_name = uf.filename or ""
+            file_name = _decode_filename(uf.filename or "")
             file_type = classify_file(file_name)
             f = await store.create_file(job_id=job.job_id, file_path=file_name, file_type=file_type)
 
