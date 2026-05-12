@@ -186,6 +186,32 @@ curl http://193.168.195.222:8005/graph/god-nodes
 
 ---
 
+## 통합테스트 결과 (2026-05-12 확인)
+
+| 파이프라인 | 테스트 파일 | 결과 | 비고 |
+|-----------|------------|------|------|
+| Pylon → Forge → LightRAG | HCA_여신심사_정책_v2.docx | ✓ rag=ingested | Forge callback 정상, 마크다운 변환 후 적재 |
+| Pylon → Robotics → LightRAG | LOAN_EVAL_PKG.pkb | ✓ rag=ingested | LLM 역문서 생성 후 callback → LightRAG |
+| Pylon → LightRAG (text_doc) | HCA_여신심사_정책.md | ✓ rag=ingested | 변환 없이 직접 적재, ~1초 완료 |
+| Pylon → Nexus (code) | hca_loan_eval.py | ✓ nodes=16, edges=22 | graphify 그래프 갱신 확인 |
+| Forge → LightRAG (직접) | HCA_여신심사_정책.docx | ✓ callback 정상 | callback_url Query param으로 전달 |
+| Robotics → LightRAG (직접) | LOAN_EVAL_PKG.pkb | ✓ LightRAG 200 OK | entities=12, relations=9 생성 |
+| OWU 질의 | — | ✓ 확인 | 중간중간 병행 검증 완료 |
+
+**로깅 확인:**
+```bash
+# Pylon 파이프라인 이력
+docker logs pylon --tail=50 | grep -E '\[Pipeline\]|\[TextDoc\]|\[Nexus\]|\[LightRAG\]'
+
+# Forge callback 이력
+docker logs forge --tail=50 | grep -E 'Callback|worker'
+
+# Robotics callback 이력
+docker logs robotics --tail=50 | grep -E 'Callback|callback'
+```
+
+---
+
 ## 트러블슈팅
 
 | 증상 | 확인 |
