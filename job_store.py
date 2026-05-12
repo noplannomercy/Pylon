@@ -6,6 +6,9 @@ from models import IngestionJob, IngestionFile
 def _now():
     return datetime.now(timezone.utc)
 
+def _row(row) -> dict:
+    return {k: str(v) if isinstance(v, uuid.UUID) else v for k, v in dict(row).items()}
+
 class InMemoryJobStore:
     def __init__(self):
         self._jobs: dict[str, IngestionJob] = {}
@@ -110,12 +113,12 @@ class PostgresJobStore:
                 "INSERT INTO ingestion_job (source_type, repo, pr_number, commit_hash) VALUES ($1,$2,$3,$4) RETURNING *",
                 source_type, repo, pr_number, commit_hash,
             )
-        return IngestionJob(**dict(row))
+        return IngestionJob(**_row(row))
 
     async def get_job(self, job_id: str) -> Optional[IngestionJob]:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM ingestion_job WHERE job_id = $1", job_id)
-        return IngestionJob(**dict(row)) if row else None
+        return IngestionJob(**_row(row)) if row else None
 
     async def update_job(self, job_id: str, **kwargs) -> Optional[IngestionJob]:
         if not kwargs:
@@ -128,7 +131,7 @@ class PostgresJobStore:
                 f"UPDATE ingestion_job SET {sets} WHERE job_id = $1 RETURNING *",
                 job_id, *vals,
             )
-        return IngestionJob(**dict(row)) if row else None
+        return IngestionJob(**_row(row)) if row else None
 
     async def create_file(self, job_id: str, file_path: str, file_type: str) -> IngestionFile:
         async with self._pool.acquire() as conn:
@@ -136,17 +139,17 @@ class PostgresJobStore:
                 "INSERT INTO ingestion_file (job_id, file_path, file_type) VALUES ($1,$2,$3) RETURNING *",
                 job_id, file_path, file_type,
             )
-        return IngestionFile(**dict(row))
+        return IngestionFile(**_row(row))
 
     async def get_file(self, file_id: str) -> Optional[IngestionFile]:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM ingestion_file WHERE file_id = $1", file_id)
-        return IngestionFile(**dict(row)) if row else None
+        return IngestionFile(**_row(row)) if row else None
 
     async def get_file_by_external_job_id(self, external_job_id: str) -> Optional[IngestionFile]:
         async with self._pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM ingestion_file WHERE external_job_id = $1", external_job_id)
-        return IngestionFile(**dict(row)) if row else None
+        return IngestionFile(**_row(row)) if row else None
 
     async def get_files_by_external_job_id(self, external_job_id: str) -> list[IngestionFile]:
         async with self._pool.acquire() as conn:
@@ -164,7 +167,7 @@ class PostgresJobStore:
                 f"UPDATE ingestion_file SET {sets} WHERE file_id = $1 RETURNING *",
                 file_id, *vals,
             )
-        return IngestionFile(**dict(row)) if row else None
+        return IngestionFile(**_row(row)) if row else None
 
     async def list_files_for_job(self, job_id: str) -> list[IngestionFile]:
         async with self._pool.acquire() as conn:
@@ -208,5 +211,5 @@ class PostgresJobStore:
         return {
             "today": {"jobs": row["total"], "completed": row["completed"], "failed": row["failed"], "partial": row["partial"]},
             "total": {"jobs": total_jobs, "files": total_files},
-            "recent_failures": [dict(r) for r in failures],
+            "recent_failures": [_row(r) for r in failures],
         }
