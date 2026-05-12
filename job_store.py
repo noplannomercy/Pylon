@@ -154,7 +154,7 @@ class PostgresJobStore:
     async def get_files_by_external_job_id(self, external_job_id: str) -> list[IngestionFile]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM ingestion_file WHERE external_job_id = $1", external_job_id)
-        return [IngestionFile(**dict(r)) for r in rows]
+        return [IngestionFile(**_row(r)) for r in rows]
 
     async def update_file(self, file_id: str, **kwargs) -> Optional[IngestionFile]:
         if not kwargs:
@@ -172,7 +172,7 @@ class PostgresJobStore:
     async def list_files_for_job(self, job_id: str) -> list[IngestionFile]:
         async with self._pool.acquire() as conn:
             rows = await conn.fetch("SELECT * FROM ingestion_file WHERE job_id = $1", job_id)
-        return [IngestionFile(**dict(r)) for r in rows]
+        return [IngestionFile(**_row(r)) for r in rows]
 
     async def list_jobs(self, page: int = 1, size: int = 20, status: str = None, source_type: str = None) -> tuple[list[IngestionJob], int]:
         conditions, vals = [], []
@@ -190,7 +190,7 @@ class PostgresJobStore:
                 f"SELECT * FROM ingestion_job {where} ORDER BY created_at DESC LIMIT ${len(vals)+1} OFFSET ${len(vals)+2}",
                 *vals, size, offset,
             )
-        return [IngestionJob(**dict(r)) for r in rows], total
+        return [IngestionJob(**_row(r)) for r in rows], total
 
     async def get_stats(self) -> dict:
         async with self._pool.acquire() as conn:
