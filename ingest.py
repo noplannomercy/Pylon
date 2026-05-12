@@ -119,9 +119,18 @@ class LightRAGClient:
 
     async def ingest_text(self, content: str, metadata: dict) -> dict:
         safe_content = content.encode("utf-8", errors="replace").decode("utf-8")
+        file_source = metadata.get("file_path", "")
+        logger.info(
+            "[LightRAG] ingest_text → file_path=%s text_len=%d file_id=%s",
+            file_source, len(safe_content), metadata.get("file_id", "-"),
+        )
         resp = await self._client.post(
             "/documents/text",
-            json={"text": safe_content, "file_source": metadata.get("file_path", "")},
+            json={"text": safe_content, "file_source": file_source},
+        )
+        logger.info(
+            "[LightRAG] ingest_text ← status=%d body=%s",
+            resp.status_code, resp.text[:300],
         )
         resp.raise_for_status()
         return resp.json()
@@ -136,15 +145,21 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
         logger.warning("Unknown external_job_id in callback: %s", external_job_id)
         return
 
+    cb_status = callback_body.get("status")
     result_text = (callback_body.get("result") or {}).get("text", "")
+    logger.info(
+        "[Pipeline] callback external_job_id=%s status=%s text_len=%d",
+        external_job_id, cb_status, len(result_text),
+    )
 
     affected_jobs = set()
     for f in files:
         if f.external_status not in ("queued", "processing"):
             continue
 
-        if callback_body.get("status") != "completed":
+        if cb_status != "completed":
             error_msg = callback_body.get("error", "processing failed")
+            logger.warning("[Pipeline] upstream failed file=%s error=%s", f.file_path, error_msg)
             await store.update_file(f.file_id, external_status="failed", error=error_msg)
             affected_jobs.add(f.job_id)
             continue
@@ -152,11 +167,12 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
         await store.update_file(f.file_id, external_status="done", rag_status="ingesting")
 
         if not result_text:
-            logger.error("Empty result_text for file %s (external_job_id=%s)", f.file_id, external_job_id)
+            logger.error("[Pipeline] empty result_text file=%s external_job_id=%s", f.file_path, external_job_id)
             await store.update_file(f.file_id, rag_status="failed", error="empty result from upstream")
             affected_jobs.add(f.job_id)
             continue
 
+        logger.info("[Pipeline] → LightRAG ingest file=%s text_len=%d", f.file_path, len(result_text))
         try:
             await lightrag.ingest_text(
                 content=result_text,
@@ -167,9 +183,10 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
                     "external_job_id": external_job_id,
                 },
             )
+            logger.info("[Pipeline] ✓ LightRAG ingested file=%s", f.file_path)
             await store.update_file(f.file_id, rag_status="ingested", completed_at=datetime.now(timezone.utc))
         except Exception as e:
-            logger.error("LightRAG ingest failed for file %s: %s", f.file_id, e)
+            logger.error("[Pipeline] ✗ LightRAG ingest failed file=%s: %s", f.file_path, e)
             await store.update_file(f.file_id, rag_status="failed", error=str(e))
 
         affected_jobs.add(f.job_id)
@@ -179,27 +196,31 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
 
 
 async def dispatch_code_file(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, nexus: NexusClient, project_id: str = "default"):
+    logger.info("[Nexus] upload file=%s size=%d project=%s", file_name, len(file_bytes), project_id)
     try:
-        await nexus.upload(file_bytes, file_name, project_id)
+        result = await nexus.upload(file_bytes, file_name, project_id)
+        logger.info("[Nexus] ✓ upload done file=%s result=%s", file_name, str(result)[:200])
         await store.update_file(file_id, external_status="done", rag_status="skipped",
                                 completed_at=datetime.now(timezone.utc))
     except Exception as e:
-        logger.error("Nexus upload failed for %s: %s", file_name, e)
+        logger.error("[Nexus] ✗ upload failed file=%s: %s", file_name, e)
         await store.update_file(file_id, external_status="failed", error=str(e))
     await _maybe_close_job(job_id, store)
 
 
 async def dispatch_text_doc(file_id: str, job_id: str, file_bytes: bytes, file_name: str, store, lightrag: LightRAGClient):
+    content = file_bytes.decode("utf-8", errors="replace")
+    logger.info("[TextDoc] → LightRAG file=%s text_len=%d", file_name, len(content))
     try:
-        content = file_bytes.decode("utf-8", errors="replace")
         await lightrag.ingest_text(
             content=content,
             metadata={"file_id": file_id, "job_id": job_id, "file_path": file_name},
         )
+        logger.info("[TextDoc] ✓ LightRAG ingested file=%s", file_name)
         await store.update_file(file_id, external_status="done", rag_status="ingested",
                                 completed_at=datetime.now(timezone.utc))
     except Exception as e:
-        logger.error("Text doc ingest failed for %s: %s", file_name, e)
+        logger.error("[TextDoc] ✗ LightRAG ingest failed file=%s: %s", file_name, e)
         await store.update_file(file_id, external_status="failed", rag_status="failed", error=str(e))
     await _maybe_close_job(job_id, store)
 
