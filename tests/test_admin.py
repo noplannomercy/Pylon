@@ -59,3 +59,16 @@ async def test_stats(test_app):
     assert resp.status_code == 200
     data = resp.json()
     assert data["total"]["jobs"] == 1
+
+@pytest.mark.asyncio
+async def test_re_ingest_plsql_returns_400(test_app):
+    """plsql 파일 re-ingest 시도 → 400 반환 (원본 bytes 없음)."""
+    a, store = test_app
+    job = await store.create_job(source_type="upload")
+    f = await store.create_file(job_id=job.job_id, file_path="PKG_body.sql", file_type="plsql")
+    await store.update_file(f.file_id, external_job_id="robotics-123", external_status="done", rag_status="failed")
+
+    async with AsyncClient(transport=ASGITransport(app=a), base_url="http://test") as client:
+        resp = await client.post(f"/files/{f.file_id}/re-ingest")
+    assert resp.status_code == 400
+    assert "plsql" in resp.json()["detail"].lower()
