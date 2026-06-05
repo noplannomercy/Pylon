@@ -50,30 +50,30 @@ async def test_forge_convert_document():
     await client.close()
 
 @pytest.mark.asyncio
-async def test_citadel_submit_success():
-    from ingest import CitadelClient
-    client = CitadelClient(base_url="http://citadel:8004", api_key="test-key")
+async def test_robotics_submit_success():
+    from ingest import RoboticsClient
+    client = RoboticsClient(base_url="http://robotics:8004", api_key="test-key")
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock()
-    mock_resp.json = MagicMock(return_value={"job_id": "citadel-abc", "status": "queued"})
+    mock_resp.json = MagicMock(return_value={"job_id": "robotics-abc", "status": "queued"})
     with patch.object(client._client, "post", new=AsyncMock(return_value=mock_resp)) as mock_post:
         result = await client.submit(
             file_bytes=b"CREATE OR REPLACE PROCEDURE SP_TEST AS BEGIN NULL; END;",
             file_name="SP_TEST.pks",
-            callback_url="http://router:8001/callback/citadel",
+            callback_url="http://router:8001/callback/robotics",
         )
         call_args = mock_post.call_args
         assert call_args[0][0] == "/jobs"
         assert call_args[1]["data"]["asset_type"] == "plsql"
-        assert call_args[1]["data"]["callback_url"] == "http://router:8001/callback/citadel"
-    assert result["job_id"] == "citadel-abc"
+        assert call_args[1]["data"]["callback_url"] == "http://router:8001/callback/robotics"
+    assert result["job_id"] == "robotics-abc"
     await client.close()
 
 @pytest.mark.asyncio
-async def test_citadel_submit_http_error():
-    from ingest import CitadelClient
+async def test_robotics_submit_http_error():
+    from ingest import RoboticsClient
     import httpx
-    client = CitadelClient(base_url="http://citadel:8004", api_key="test-key")
+    client = RoboticsClient(base_url="http://robotics:8004", api_key="test-key")
     mock_resp = MagicMock()
     mock_resp.raise_for_status = MagicMock(side_effect=httpx.HTTPStatusError("500", request=MagicMock(), response=MagicMock()))
     with patch.object(client._client, "post", new=AsyncMock(return_value=mock_resp)):

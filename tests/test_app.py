@@ -12,13 +12,13 @@ def test_config():
     return Config(
         forge_url="http://forge:8003",
         lightrag_url="http://lightrag:9621",
-        citadel_url="http://citadel:8004",
+        robotics_url="http://robotics:8004",
         nexus_url="http://nexus:8005",
         database_url="",
         bitbucket_webhook_secret="test-secret",
         forge_api_key="key",
         lightrag_api_key="key",
-        citadel_api_key="key",
+        robotics_api_key="key",
         nexus_api_key="key",
         self_url="http://localhost:8001",
     )
@@ -86,18 +86,18 @@ async def test_bulk_ingest(app_instance):
     assert data["file_count"] == 3
 
 @pytest.mark.asyncio
-async def test_callback_citadel_completed(app_instance):
-    """Citadel 완료 콜백 — LightRAG ingest 트리거."""
+async def test_callback_robotics_completed(app_instance):
+    """Robotics 완료 콜백 — LightRAG ingest 트리거."""
     store = app_instance.state.store
     job = await store.create_job(source_type="webhook", repo="GCore")
     f = await store.create_file(job_id=job.job_id, file_path="PKG.pkb", file_type="plsql")
-    await store.update_file(f.file_id, external_job_id="citadel-999", external_status="processing")
+    await store.update_file(f.file_id, external_job_id="robotics-999", external_status="processing")
 
     async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
         resp = await client.post(
-            "/callback/citadel",
+            "/callback/robotics",
             json={
-                "rdoc_job_id": "citadel-999",
+                "rdoc_job_id": "robotics-999",
                 "file_name": "PKG.pkb",
                 "content": "# PKG 역문서화 결과",
                 "status": "completed",
@@ -108,18 +108,18 @@ async def test_callback_citadel_completed(app_instance):
     assert resp.json()["received"] is True
 
 @pytest.mark.asyncio
-async def test_callback_citadel_failed(app_instance):
-    """Citadel 실패 콜백 — external_status='failed' 기록."""
+async def test_callback_robotics_failed(app_instance):
+    """Robotics 실패 콜백 — external_status='failed' 기록."""
     store = app_instance.state.store
     job = await store.create_job(source_type="webhook", repo="GCore")
     f = await store.create_file(job_id=job.job_id, file_path="PKG.pkb", file_type="plsql")
-    await store.update_file(f.file_id, external_job_id="citadel-fail", external_status="processing")
+    await store.update_file(f.file_id, external_job_id="robotics-fail", external_status="processing")
 
     async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
         resp = await client.post(
-            "/callback/citadel",
+            "/callback/robotics",
             json={
-                "rdoc_job_id": "citadel-fail",
+                "rdoc_job_id": "robotics-fail",
                 "file_name": "PKG.pkb",
                 "content": "",
                 "status": "failed",
@@ -135,11 +135,11 @@ async def test_callback_citadel_failed(app_instance):
     assert updated.error == "LLM timeout"
 
 @pytest.mark.asyncio
-async def test_callback_citadel_unknown_job(app_instance):
+async def test_callback_robotics_unknown_job(app_instance):
     """알 수 없는 rdoc_job_id — 200 반환 (fire-and-forget 패턴 유지)."""
     async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
         resp = await client.post(
-            "/callback/citadel",
+            "/callback/robotics",
             json={
                 "rdoc_job_id": "unknown-id",
                 "file_name": "X.pkb",
