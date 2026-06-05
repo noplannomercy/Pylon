@@ -107,3 +107,54 @@ async def test_nexus_rebuild_success():
         assert mock_post.call_args[0][0] == "/rebuild/"
     assert result["status"] == "ok"
     await client.close()
+
+def test_is_body_file_true():
+    from ingest import is_body_file
+    assert is_body_file("PG_BATCHEOTBALLLEAACC_body.sql") is True
+    assert is_body_file("PKG_LOAN_BODY.pkb") is True
+    assert is_body_file("SP_PROC_BODY.pks") is True
+    assert is_body_file("SOME_PACKAGE_BODY.sql") is True
+
+def test_is_body_file_false():
+    from ingest import is_body_file
+    assert is_body_file("PG_BATCHEOTBALLLEAACC_header.sql") is False
+    assert is_body_file("PKG_LOAN.pkb") is False
+    assert is_body_file("SP_PROC.sql") is False
+    assert is_body_file("PG_BATCH_HEADER.pks") is False
+
+@pytest.mark.asyncio
+async def test_dispatch_plsql_direct_success():
+    from ingest import dispatch_plsql_direct
+    from job_store import InMemoryJobStore
+    store = InMemoryJobStore()
+    job = await store.create_job(source_type="upload")
+    f = await store.create_file(job_id=job.job_id, file_path="PKG_header.sql", file_type="plsql")
+
+    lightrag = AsyncMock()
+    lightrag.ingest_text = AsyncMock(return_value={"status": "ok"})
+
+    await dispatch_plsql_direct(f.file_id, job.job_id, b"CREATE OR REPLACE PACKAGE PKG AS END;", "PKG_header.sql", store, lightrag)
+
+    lightrag.ingest_text.assert_called_once()
+    updated = await store.get_file(f.file_id)
+    assert updated.external_status == "done"
+    assert updated.rag_status == "ingested"
+
+@pytest.mark.asyncio
+async def test_dispatch_plsql_direct_no_status_update():
+    from ingest import dispatch_plsql_direct
+    from job_store import InMemoryJobStore
+    store = InMemoryJobStore()
+    job = await store.create_job(source_type="upload")
+    f = await store.create_file(job_id=job.job_id, file_path="PKG_body.sql", file_type="plsql")
+
+    lightrag = AsyncMock()
+    lightrag.ingest_text = AsyncMock(return_value={"status": "ok"})
+
+    await dispatch_plsql_direct(f.file_id, job.job_id, b"CREATE OR REPLACE PACKAGE BODY PKG AS END;", "PKG_body.sql", store, lightrag, update_status=False)
+
+    lightrag.ingest_text.assert_called_once()
+    updated = await store.get_file(f.file_id)
+    # status should NOT be updated
+    assert updated.external_status == "queued"
+    assert updated.rag_status == "pending"
