@@ -23,8 +23,9 @@ def classify_file(file_path: str) -> str:
         return "code"
     return "skip"
 
-def is_body_file(filename: str) -> bool:
-    return "_body" in filename.lower()
+def is_body_file(file_bytes: bytes) -> bool:
+    header = file_bytes[:500].decode("utf-8", errors="replace").lower()
+    return "package body" in header
 
 
 class ForgeClient:

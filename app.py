@@ -202,7 +202,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
                     dispatch_text_doc(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
                 ))
             elif file_type == "plsql":
-                if is_body_file(file_name):
+                if is_body_file(file_bytes):
                     # 원문 → LightRAG 직접 (fire-and-forget, 상태 미업데이트)
                     asyncio.create_task(_safe_process(
                         dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag, update_status=False)

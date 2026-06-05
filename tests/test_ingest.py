@@ -110,17 +110,15 @@ async def test_nexus_rebuild_success():
 
 def test_is_body_file_true():
     from ingest import is_body_file
-    assert is_body_file("PG_BATCHEOTBALLLEAACC_body.sql") is True
-    assert is_body_file("PKG_LOAN_BODY.pkb") is True
-    assert is_body_file("SP_PROC_BODY.pks") is True
-    assert is_body_file("SOME_PACKAGE_BODY.sql") is True
+    assert is_body_file(b"create or replace package body PG_TEST as") is True
+    assert is_body_file(b"CREATE OR REPLACE PACKAGE BODY PKG_LOAN AS") is True
+    assert is_body_file(b"  package body SP_PROC as\nbegin\nend;") is True
 
 def test_is_body_file_false():
     from ingest import is_body_file
-    assert is_body_file("PG_BATCHEOTBALLLEAACC_header.sql") is False
-    assert is_body_file("PKG_LOAN.pkb") is False
-    assert is_body_file("SP_PROC.sql") is False
-    assert is_body_file("PG_BATCH_HEADER.pks") is False
+    assert is_body_file(b"create or replace package PG_TEST as") is False
+    assert is_body_file(b"CREATE OR REPLACE PROCEDURE SP_PROC AS") is False
+    assert is_body_file(b"-- header file\ncreate or replace package PKG as") is False
 
 @pytest.mark.asyncio
 async def test_dispatch_plsql_direct_success():
