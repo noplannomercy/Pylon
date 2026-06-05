@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
 from config import Config
-from ingest import RoboticsClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_text_doc, dispatch_code_file
+from ingest import RoboticsClient, ForgeClient, LightRAGClient, NexusClient, classify_file, is_body_file, advance_pipeline, _maybe_close_job, dispatch_text_doc, dispatch_code_file, dispatch_plsql_direct
 from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
@@ -199,14 +199,25 @@ def create_app(store=None, config: Config = None) -> FastAPI:
                     dispatch_text_doc(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
                 ))
             elif file_type == "plsql":
-                callback_url = f"{config.self_url}/callback/robotics"
-                try:
-                    result = await robotics.submit(file_bytes, file_name, callback_url)
-                    ext_id = result.get("rdoc_job_id") or result.get("job_id", "")
-                    await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
-                except Exception as e:
-                    logger.error("Robotics submit failed for %s: %s", file_name, e)
-                    await store.update_file(f.file_id, external_status="failed", error=str(e))
+                if is_body_file(file_name):
+                    # 원문 → LightRAG 직접 (fire-and-forget, 상태 미업데이트)
+                    asyncio.create_task(_safe_process(
+                        dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag, update_status=False)
+                    ))
+                    # REVDOC → Robotics 제출 (상태 추적 primary)
+                    callback_url = f"{config.self_url}/callback/robotics"
+                    try:
+                        result = await robotics.submit(file_bytes, file_name, callback_url)
+                        ext_id = result.get("rdoc_job_id") or result.get("job_id", "")
+                        await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
+                    except Exception as e:
+                        logger.error("Robotics submit failed for %s: %s", file_name, e)
+                        await store.update_file(f.file_id, external_status="failed", error=str(e))
+                else:
+                    # header / 패턴 없는 sql → LightRAG 직접 ingest (상태 업데이트 포함)
+                    asyncio.create_task(_safe_process(
+                        dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
+                    ))
             elif file_type == "document":
                 callback_url = f"{config.self_url}/callback/forge"
                 try:

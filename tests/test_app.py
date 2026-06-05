@@ -238,3 +238,71 @@ async def test_webhook_all_skip_completes_job(app_instance):
     job_id = resp.json()["job_id"]
     job = await app_instance.state.store.get_job(job_id)
     assert job.status == "completed"
+
+
+@pytest.mark.asyncio
+async def test_ingest_upload_plsql_body_dispatches_to_robotics_and_lightrag(app_instance, test_config):
+    """body 파일 → Robotics 제출 + LightRAG 직접 ingest 둘 다 호출."""
+    import asyncio
+    import respx
+    import httpx
+    from ingest import RoboticsClient, LightRAGClient
+
+    app_instance.state.robotics = RoboticsClient(base_url=test_config.robotics_url, api_key=test_config.robotics_api_key)
+    app_instance.state.lightrag = LightRAGClient(base_url=test_config.lightrag_url, api_key=test_config.lightrag_api_key)
+
+    async with respx.mock:
+        respx.post("http://robotics:8004/jobs").mock(
+            return_value=httpx.Response(200, json={"rdoc_job_id": "robotics-body-1", "status": "queued"})
+        )
+        respx.post("http://lightrag:9621/documents/text").mock(
+            return_value=httpx.Response(200, json={"status": "ok"})
+        )
+        async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
+            resp = await client.post(
+                "/ingest/upload",
+                files=[("files", ("PKG_body.sql", b"CREATE OR REPLACE PACKAGE BODY PKG AS END;", "text/plain"))],
+            )
+        assert resp.status_code == 202
+        await asyncio.sleep(0.1)
+
+    store = app_instance.state.store
+    data = resp.json()
+    files = await store.list_files_for_job(data["job_id"])
+    assert len(files) == 1
+    assert files[0].external_status == "processing"
+    assert files[0].external_job_id == "robotics-body-1"
+
+    await app_instance.state.robotics.close()
+    await app_instance.state.lightrag.close()
+
+
+@pytest.mark.asyncio
+async def test_ingest_upload_plsql_header_dispatches_to_lightrag_only(app_instance, test_config):
+    """header 파일 → LightRAG 직접 ingest만, Robotics 호출 없음."""
+    import asyncio
+    import respx
+    import httpx
+    from ingest import LightRAGClient
+
+    app_instance.state.lightrag = LightRAGClient(base_url=test_config.lightrag_url, api_key=test_config.lightrag_api_key)
+
+    async with respx.mock:
+        lightrag_mock = respx.post("http://lightrag:9621/documents/text").mock(
+            return_value=httpx.Response(200, json={"status": "ok"})
+        )
+        async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
+            resp = await client.post(
+                "/ingest/upload",
+                files=[("files", ("PKG_header.sql", b"CREATE OR REPLACE PACKAGE PKG AS END;", "text/plain"))],
+            )
+        assert resp.status_code == 202
+        await asyncio.sleep(0.1)
+
+    assert lightrag_mock.called
+    store = app_instance.state.store
+    data = resp.json()
+    files = await store.list_files_for_job(data["job_id"])
+    assert files[0].rag_status == "ingested"
+
+    await app_instance.state.lightrag.close()
