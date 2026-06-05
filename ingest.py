@@ -49,7 +49,7 @@ class ForgeClient:
         await self._client.aclose()
 
 
-class CitadelClient:
+class RoboticsClient:
     def __init__(self, base_url: str, api_key: str):
         headers = {}
         if api_key:
