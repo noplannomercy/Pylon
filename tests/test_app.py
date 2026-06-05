@@ -136,7 +136,7 @@ async def test_callback_robotics_failed(app_instance):
 
 @pytest.mark.asyncio
 async def test_callback_robotics_unknown_job(app_instance):
-    """알 수 없는 rdoc_job_id — 200 반환 (fire-and-forget 패턴 유지)."""
+    """알 수 없는 rdoc_job_id → 404 반환."""
     async with AsyncClient(transport=ASGITransport(app=app_instance), base_url="http://test") as client:
         resp = await client.post(
             "/callback/robotics",
@@ -148,7 +148,7 @@ async def test_callback_robotics_unknown_job(app_instance):
                 "error": None,
             },
         )
-    assert resp.status_code == 200
+    assert resp.status_code == 404
 
 @pytest.mark.asyncio
 async def test_graphify_rebuild(app_instance, test_config):

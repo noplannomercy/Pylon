@@ -143,6 +143,9 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             "result": {"text": body.get("text") or body.get("content", "")},
             "error": body.get("error"),
         }
+        files = await request.app.state.store.get_files_by_external_job_id(rdoc_job_id)
+        if not files:
+            raise HTTPException(status_code=404, detail=f"Unknown rdoc_job_id: {rdoc_job_id}")
         asyncio.create_task(_safe_process(
             advance_pipeline(
                 external_job_id=rdoc_job_id,
