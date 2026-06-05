@@ -2,13 +2,13 @@
 
 - 이 파일을 끝까지 읽은 뒤 작업을 시작할 것
 - `python -m pytest tests/ -v`로 현재 테스트 상태 확인 후 작업 시작
-- `.env`에 `LIGHTRAG_URL`, `FORGE_URL`, `CITADEL_URL`, `NEXUS_URL`, `SELF_URL` 설정 확인 — 모두 서버 IP 기반이어야 함 (localhost 금지)
+- `.env`에 `LIGHTRAG_URL`, `FORGE_URL`, `ROBOTICS_URL`, `NEXUS_URL`, `SELF_URL` 설정 확인 — 모두 서버 IP 기반이어야 함 (localhost 금지)
 
 ---
 
 # 개요
 
-Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) / Forge(문서) / skip(코드·기타) 파이프라인을 구동하고 전 단계 상태를 추적하는 FastAPI 오케스트레이터 서비스다. 포트 8001.
+Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Robotics(PL/SQL) / Forge(문서) / skip(코드·기타) 파이프라인을 구동하고 전 단계 상태를 추적하는 FastAPI 오케스트레이터 서비스다. 포트 8001.
 
 ---
 
@@ -19,8 +19,8 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 | C1 | asyncio.create_task 호출 시 반드시 `_safe_process` 래퍼 사용 | fire-and-forget에서 예외가 삼켜지는 문제. |
 | C2 | JobStore 인터페이스를 우회하여 dict에 직접 접근 금지 | PostgresJobStore 전환 시 코드 변경 최소화. |
 | C3 | API 키, 시크릿 하드코딩 금지 | `.env` 또는 환경변수. config.py의 pydantic-settings로 관리. |
-| C4 | Citadel/Forge 콜백은 `external_job_id` 기준으로만 파일 역조회 | file_id는 내부 식별자, external_job_id가 외부 연결 키. |
-| C5 | Docker 컨테이너 내 `localhost`는 컨테이너 자신 | .env의 NEXUS_URL/CITADEL_URL/SELF_URL을 서버 IP로 설정해야 라우팅됨. SELF_URL이 localhost이면 Forge/Citadel callback이 컨테이너 자신으로 향해 실패. `docker restart`는 .env 미반영 — `docker compose up -d --force-recreate` 사용. |
+| C4 | Robotics/Forge 콜백은 `external_job_id` 기준으로만 파일 역조회 | file_id는 내부 식별자, external_job_id가 외부 연결 키. |
+| C5 | Docker 컨테이너 내 `localhost`는 컨테이너 자신 | .env의 NEXUS_URL/ROBOTICS_URL/SELF_URL을 서버 IP로 설정해야 라우팅됨. SELF_URL이 localhost이면 Forge/Robotics callback이 컨테이너 자신으로 향해 실패. `docker restart`는 .env 미반영 — `docker compose up -d --force-recreate` 사용. |
 
 ---
 
@@ -30,7 +30,7 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 |------|------|
 | Python 3.11+ | 런타임 |
 | FastAPI + uvicorn | REST API (포트 8001) |
-| httpx (async) | Citadel / Forge / LightRAG / Nexus API 호출 |
+| httpx (async) | Robotics / Forge / LightRAG / Nexus API 호출 |
 | pydantic-settings | 환경변수 관리 |
 | asyncpg | PostgreSQL 비동기 드라이버 |
 
@@ -42,7 +42,7 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 |------|------|
 | `app.py` | FastAPI 엔트리포인트 + lifespan + webhook/callback/bulk/upload/graphify-rebuild/openapi-all 라우트 |
 | `admin.py` | 모니터링 API (GET /jobs, /files, /stats, /health/all, POST /reject, /re-ingest, /retry) |
-| `ingest.py` | ForgeClient, CitadelClient, NexusClient, LightRAGClient, classify_file, advance_pipeline, dispatch_code_file, _maybe_close_job |
+| `ingest.py` | ForgeClient, RoboticsClient, NexusClient, LightRAGClient, classify_file, advance_pipeline, dispatch_code_file, _maybe_close_job |
 | `webhook.py` | HMAC 검증 + Bitbucket payload 파싱 (HCS 환경 확인 후 이 파일만 수정) |
 | `job_store.py` | InMemoryJobStore + PostgresJobStore (DATABASE_URL 있으면 자동 전환) |
 | `config.py` | 환경변수 로드 |
@@ -55,12 +55,14 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 # 파일 유형 분기
 
 ```
-확장자                           file_type   라우팅
-.pkb .pks .sql .prc .fnc     →  plsql      Citadel POST /jobs
-.pdf .docx .pptx .xlsx .md   →  document   Forge POST /convert
-.java .js .ts .jsx .tsx .py  →  code       /ingest/upload → Nexus POST /rebuild/upload
-                                            /webhook/bulk → skipped (파일 bytes 없음)
-그 외                         →  skip       skipped 기록만
+확장자                                        file_type   라우팅
+.pkb .pks .sql .prc .fnc  (_body 포함)   →  plsql      LightRAG 직접(fire-and-forget) + Robotics POST /jobs
+.pkb .pks .sql .prc .fnc  (그 외)        →  plsql      LightRAG 직접 ingest
+.pdf .docx .pptx .xlsx .hwpx             →  document   Forge POST /convert
+.md .txt                                 →  text_doc   LightRAG 직접
+.java .js .ts .jsx .tsx .py              →  code       /ingest/upload → Nexus POST /rebuild/upload
+                                                        /webhook/bulk → skipped (파일 bytes 없음)
+그 외                                     →  skip       skipped 기록만
 ```
 
 ---
@@ -69,12 +71,14 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 
 ```
 [직접 파일 업로드] POST /ingest/upload (multipart files)
-  → 파일별 classify_file()
-  → code    → dispatch_code_file() async → Nexus POST /rebuild/upload → 그래프 갱신
-  → plsql   → CitadelClient.submit() → POST /callback/citadel 수신 → advance_pipeline() → LightRAG
-  → document → ForgeClient.convert() → POST /callback/forge 수신  → advance_pipeline() → LightRAG
-  → skip    → skipped 기록만
-  → _maybe_close_job() → job status 완료 처리
+  → 파일별 classify_file() + is_body_file()
+  → plsql (_body 포함) → dispatch_plsql_direct(update_status=False) fire-and-forget → LightRAG 원문
+                       → RoboticsClient.submit() → POST /callback/robotics → advance_pipeline() → LightRAG REVDOC
+  → plsql (그 외)     → dispatch_plsql_direct() → LightRAG 원문
+  → document          → ForgeClient.convert() → POST /callback/forge → advance_pipeline() → LightRAG
+  → text_doc          → dispatch_text_doc() → LightRAG
+  → code              → dispatch_code_file() → Nexus
+  → skip              → skipped 기록만
 
 [Bitbucket Webhook] POST /webhook/bitbucket (HMAC 검증 → payload 파싱 → 파일 경로만 수신)
   → Bitbucket API로 파일 bytes fetch  ← [미구현]
@@ -90,7 +94,7 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Citadel(PL/SQL) 
 | # | 항목 | 비고 |
 |---|------|------|
 | 🔴 1 | **Bitbucket 파일 bytes fetch** | Bitbucket API 클라이언트 미구현 |
-| 🔴 2 | **Citadel/Forge 실제 호출 (webhook/bulk)** | /ingest/upload는 완료. webhook/bulk는 Bitbucket bytes fetch 미구현으로 여전히 skipped 처리 |
+| 🔴 2 | **Robotics/Forge 실제 호출 (webhook/bulk)** | /ingest/upload는 완료. webhook/bulk는 Bitbucket bytes fetch 미구현으로 여전히 skipped 처리 |
 | 🟡 3 | **PostgreSQL 연결** | `.env`에 `DATABASE_URL` 추가만 하면 됨 (코드 준비됨) |
 | 🟡 4 | **Admin 인증** | 현재 모든 admin 엔드포인트 인증 없음 |
 | 🟡 5 | **docker-compose.yml** | Dockerfile은 있음 |
@@ -122,14 +126,14 @@ curl http://localhost:8001/health/all
 ```
 LIGHTRAG_URL=http://193.168.195.222:9621
 FORGE_URL=http://193.168.195.222:8003
-CITADEL_URL=http://localhost:8004         # Citadel이 같은 호스트에 있으면 host network 또는 서버 IP 사용
+ROBOTICS_URL=http://localhost:8004        # Robotics가 같은 호스트에 있으면 host network 또는 서버 IP 사용
 NEXUS_URL=http://193.168.195.222:8005   # Docker 컨테이너 내에서 localhost는 컨테이너 자신 → 서버 IP 필요
 SELF_URL=http://localhost:8001
 DATABASE_URL=                        # 비워두면 InMemory, 설정 시 Postgres 자동 전환
 BITBUCKET_WEBHOOK_SECRET=            # HMAC 검증용
 FORGE_API_KEY=
 LIGHTRAG_API_KEY=
-CITADEL_API_KEY=
+ROBOTICS_API_KEY=
 NEXUS_API_KEY=
 ```
 
@@ -139,7 +143,7 @@ NEXUS_API_KEY=
 
 | 문서 | 설명 |
 |------|------|
-| `docs/superpowers/specs/2026-04-29-ingestion-router-v2-design.md` | v2 설계 스펙 (Citadel, code 파일, external_job_id) |
+| `docs/superpowers/specs/2026-04-29-ingestion-router-v2-design.md` | v2 설계 스펙 (Robotics, code 파일, external_job_id) |
 | `docs/superpowers/plans/2026-04-29-ingestion-router-v2.md` | v2 구현 플랜 (8 Task) |
 | `docs/superpowers/specs/2026-04-24-hcs-ingestion-router-design.md` | v1 설계 스펙 (참조용) |
 
