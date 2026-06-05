@@ -53,15 +53,15 @@ vi .env
 | `BITBUCKET_WEBHOOK_SECRET` | Bitbucket Webhook HMAC 시크릿 | |
 | `FORGE_URL` | Forge 서비스 URL | `http://forge:8003` |
 | `FORGE_API_KEY` | Forge API 키 | |
-| `CITADEL_URL` | Robotics 서비스 URL | `http://robotics:8004` |
-| `CITADEL_API_KEY` | Robotics ADMIN_API_KEY | |
+| `ROBOTICS_URL` | Robotics 서비스 URL | `http://robotics:8004` |
+| `ROBOTICS_API_KEY` | Robotics ADMIN_API_KEY | |
 | `LIGHTRAG_URL` | LightRAG URL | `http://lightrag:9621` |
 | `LIGHTRAG_API_KEY` | LightRAG API 키 | |
 | `NEXUS_URL` | Nexus API URL | `http://nexus-api:8005` |
 | `NEXUS_API_KEY` | Nexus API 키 | |
 | `SELF_URL` | 콜백 수신용 자기 URL | `http://pylon:8001` |
 
-> `CITADEL_URL`/`CITADEL_API_KEY` 는 내부 변수명으로, Robotics 서비스를 가리킴.
+> `ROBOTICS_URL`/`ROBOTICS_API_KEY`는 Robotics 역문서 서비스를 가리킴.
 
 ```bash
 # 3. 빌드 + 기동
@@ -109,5 +109,5 @@ docker compose down
 |------|------|------|
 | Webhook 401 | HMAC 시크릿 불일치 | `BITBUCKET_WEBHOOK_SECRET` 확인 |
 | Forge 호출 실패 | URL/키 오류 | `FORGE_URL`, `FORGE_API_KEY` 확인 |
-| Robotics 호출 실패 | URL/키 오류 | `CITADEL_URL`, `CITADEL_API_KEY` 확인 |
+| Robotics 호출 실패 | URL/키 오류 | `ROBOTICS_URL`, `ROBOTICS_API_KEY` 확인 |
 | DB 연결 실패 | DSN 오류 | `DATABASE_URL` 확인 |
