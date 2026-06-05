@@ -184,7 +184,7 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
                 metadata={
                     "file_id": f.file_id,
                     "job_id": f.job_id,
-                    "file_path": f.file_path,
+                    "file_path": f.file_path.rsplit(".", 1)[0] + "_REVDOC.md",
                     "external_job_id": external_job_id,
                 },
             )
