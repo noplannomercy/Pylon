@@ -97,7 +97,7 @@ def create_admin_router(app_state) -> APIRouter:
             for name, url in [
                 ("forge", config.forge_url),
                 ("lightrag", config.lightrag_url),
-                ("citadel", config.citadel_url),
+                ("robotics", config.robotics_url),
                 ("nexus", config.nexus_url),
             ]:
                 try:
