@@ -8,7 +8,7 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 
 from config import Config
-from ingest import CitadelClient, ForgeClient, LightRAGClient, NexusClient, classify_file, advance_pipeline, _maybe_close_job, dispatch_text_doc, dispatch_code_file
+from ingest import RoboticsClient, ForgeClient, LightRAGClient, NexusClient, classify_file, is_body_file, advance_pipeline, _maybe_close_job, dispatch_text_doc, dispatch_code_file, dispatch_plsql_direct
 from job_store import InMemoryJobStore
 from webhook import verify_hmac, parse_bitbucket_payload
 from admin import create_admin_router
@@ -42,7 +42,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
     async def lifespan(a):
         a.state.config = config
         a.state.forge = ForgeClient(base_url=config.forge_url, api_key=config.forge_api_key)
-        a.state.citadel = CitadelClient(base_url=config.citadel_url, api_key=config.citadel_api_key)
+        a.state.robotics = RoboticsClient(base_url=config.robotics_url, api_key=config.robotics_api_key)
         a.state.nexus = NexusClient(base_url=config.nexus_url, api_key=config.nexus_api_key)
         a.state.lightrag = LightRAGClient(base_url=config.lightrag_url, api_key=config.lightrag_api_key)
 
@@ -62,7 +62,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         yield
 
         await a.state.forge.close()
-        await a.state.citadel.close()
+        await a.state.robotics.close()
         await a.state.nexus.close()
         await a.state.lightrag.close()
         if hasattr(a.state, "pool"):
@@ -72,7 +72,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
     app.state.store = store
     app.state.config = config
     app.state.forge = None
-    app.state.citadel = None
+    app.state.robotics = None
     app.state.nexus = None
     app.state.lightrag = None
 
@@ -134,8 +134,8 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         ))
         return {"received": True}
 
-    @app.post("/callback/citadel")
-    async def citadel_callback(request: Request):
+    @app.post("/callback/robotics")
+    async def robotics_callback(request: Request):
         body = await request.json()
         rdoc_job_id = body.get("rdoc_job_id", "")
         normalized = {
@@ -143,6 +143,9 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             "result": {"text": body.get("text") or body.get("content", "")},
             "error": body.get("error"),
         }
+        files = await request.app.state.store.get_files_by_external_job_id(rdoc_job_id)
+        if not files:
+            raise HTTPException(status_code=404, detail=f"Unknown rdoc_job_id: {rdoc_job_id}")
         asyncio.create_task(_safe_process(
             advance_pipeline(
                 external_job_id=rdoc_job_id,
@@ -176,7 +179,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         store = request.app.state.store
         nexus = request.app.state.nexus
         forge = request.app.state.forge
-        citadel = request.app.state.citadel
+        robotics = request.app.state.robotics
         config = request.app.state.config
 
         job = await store.create_job(source_type="upload")
@@ -199,14 +202,25 @@ def create_app(store=None, config: Config = None) -> FastAPI:
                     dispatch_text_doc(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
                 ))
             elif file_type == "plsql":
-                callback_url = f"{config.self_url}/callback/citadel"
-                try:
-                    result = await citadel.submit(file_bytes, file_name, callback_url)
-                    ext_id = result.get("rdoc_job_id") or result.get("job_id", "")
-                    await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
-                except Exception as e:
-                    logger.error("Citadel submit failed for %s: %s", file_name, e)
-                    await store.update_file(f.file_id, external_status="failed", error=str(e))
+                if is_body_file(file_name):
+                    # 원문 → LightRAG 직접 (fire-and-forget, 상태 미업데이트)
+                    asyncio.create_task(_safe_process(
+                        dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag, update_status=False)
+                    ))
+                    # REVDOC → Robotics 제출 (상태 추적 primary)
+                    callback_url = f"{config.self_url}/callback/robotics"
+                    try:
+                        result = await robotics.submit(file_bytes, file_name, callback_url)
+                        ext_id = result.get("rdoc_job_id") or result.get("job_id", "")
+                        await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
+                    except Exception as e:
+                        logger.error("Robotics submit failed for %s: %s", file_name, e)
+                        await store.update_file(f.file_id, external_status="failed", error=str(e))
+                else:
+                    # header / 패턴 없는 sql → LightRAG 직접 ingest (상태 업데이트 포함)
+                    asyncio.create_task(_safe_process(
+                        dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
+                    ))
             elif file_type == "document":
                 callback_url = f"{config.self_url}/callback/forge"
                 try:

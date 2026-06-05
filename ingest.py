@@ -23,6 +23,10 @@ def classify_file(file_path: str) -> str:
         return "code"
     return "skip"
 
+def is_body_file(filename: str) -> bool:
+    return "_body" in filename.lower()
+
+
 class ForgeClient:
     def __init__(self, base_url: str, api_key: str):
         self._client = httpx.AsyncClient(
@@ -49,7 +53,7 @@ class ForgeClient:
         await self._client.aclose()
 
 
-class CitadelClient:
+class RoboticsClient:
     def __init__(self, base_url: str, api_key: str):
         headers = {}
         if api_key:
@@ -223,6 +227,34 @@ async def dispatch_text_doc(file_id: str, job_id: str, file_bytes: bytes, file_n
         logger.error("[TextDoc] ✗ LightRAG ingest failed file=%s: %s", file_name, e)
         await store.update_file(file_id, external_status="failed", rag_status="failed", error=str(e))
     await _maybe_close_job(job_id, store)
+
+
+async def dispatch_plsql_direct(
+    file_id: str,
+    job_id: str,
+    file_bytes: bytes,
+    file_name: str,
+    store,
+    lightrag: LightRAGClient,
+    update_status: bool = True,
+):
+    content = file_bytes.decode("utf-8", errors="replace")
+    logger.info("[PlsqlDirect] → LightRAG file=%s text_len=%d update_status=%s", file_name, len(content), update_status)
+    try:
+        await lightrag.ingest_text(
+            content=content,
+            metadata={"file_id": file_id, "job_id": job_id, "file_path": file_name},
+        )
+        logger.info("[PlsqlDirect] ✓ LightRAG ingested file=%s", file_name)
+        if update_status:
+            await store.update_file(file_id, external_status="done", rag_status="ingested",
+                                    completed_at=datetime.now(timezone.utc))
+    except Exception as e:
+        logger.error("[PlsqlDirect] ✗ LightRAG ingest failed file=%s: %s", file_name, e)
+        if update_status:
+            await store.update_file(file_id, external_status="failed", rag_status="failed", error=str(e))
+    if update_status:
+        await _maybe_close_job(job_id, store)
 
 
 async def _maybe_close_job(job_id: str, store):

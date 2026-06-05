@@ -54,6 +54,13 @@ def create_admin_router(app_state) -> APIRouter:
         f = await app_state.store.get_file(file_id)
         if f is None:
             raise HTTPException(status_code=404, detail="File not found")
+
+        if f.file_type == "plsql":
+            raise HTTPException(
+                status_code=400,
+                detail="plsql 파일은 원본 bytes가 없어 re-ingest 불가. 파일을 다시 업로드하세요.",
+            )
+
         lightrag = getattr(app_state, "lightrag", None)
         forge = getattr(app_state, "forge", None)
         if lightrag is None:
@@ -97,7 +104,7 @@ def create_admin_router(app_state) -> APIRouter:
             for name, url in [
                 ("forge", config.forge_url),
                 ("lightrag", config.lightrag_url),
-                ("citadel", config.citadel_url),
+                ("robotics", config.robotics_url),
                 ("nexus", config.nexus_url),
             ]:
                 try:

@@ -75,14 +75,14 @@ async def test_job_completed_with_code_files():
     job = await store.create_job(source_type="webhook", repo="GCore")
     f_plsql = await store.create_file(job_id=job.job_id, file_path="A.pkb", file_type="plsql")
     f_code = await store.create_file(job_id=job.job_id, file_path="Main.java", file_type="code")
-    await store.update_file(f_plsql.file_id, external_job_id="citadel-1", external_status="processing")
+    await store.update_file(f_plsql.file_id, external_job_id="robotics-1", external_status="processing")
     await store.update_file(f_code.file_id, external_status="skipped", rag_status="skipped")
 
     lightrag = AsyncMock()
     lightrag.ingest_text = AsyncMock(return_value={"status": "ok"})
 
     await advance_pipeline(
-        external_job_id="citadel-1",
+        external_job_id="robotics-1",
         callback_body={"status": "completed", "result": {"text": "역문서화 결과"}},
         store=store,
         lightrag=lightrag,
