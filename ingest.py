@@ -24,8 +24,9 @@ def classify_file(file_path: str) -> str:
     return "skip"
 
 def is_body_file(file_bytes: bytes) -> bool:
-    header = file_bytes[:500].decode("utf-8", errors="replace").lower()
-    return "package body" in header
+    # 전체 내용 스캔 — 라이선스 배너가 길어 'package body'가 500바이트 뒤에 와도 탐지 (#1)
+    text = file_bytes.decode("utf-8", errors="replace").lower()
+    return "package body" in text
 
 
 class ForgeClient:
@@ -159,17 +160,20 @@ async def advance_pipeline(external_job_id: str, callback_body: dict, store, lig
 
     affected_jobs = set()
     for f in files:
-        if f.external_status not in ("queued", "processing"):
-            continue
-
         if cb_status != "completed":
             error_msg = callback_body.get("error", "processing failed")
+            # 원자적 전이 — 동시 콜백 중 하나만 실패 기록 (#8)
+            claimed = await store.claim_file(f.file_id, ("queued", "processing"), external_status="failed", error=error_msg)
+            if claimed is None:
+                continue
             logger.warning("[Pipeline] upstream failed file=%s error=%s", f.file_path, error_msg)
-            await store.update_file(f.file_id, external_status="failed", error=error_msg)
             affected_jobs.add(f.job_id)
             continue
 
-        await store.update_file(f.file_id, external_status="done", rag_status="ingesting")
+        # 원자적으로 처리권 획득 — 동시 콜백/재시도 중 하나만 ingest, 이중 적재 차단 (#8 TOCTOU)
+        claimed = await store.claim_file(f.file_id, ("queued", "processing"), external_status="done", rag_status="ingesting")
+        if claimed is None:
+            continue
 
         if not result_text:
             logger.error("[Pipeline] empty result_text file=%s external_job_id=%s", f.file_path, external_job_id)

@@ -88,9 +88,36 @@ def create_admin_router(app_state) -> APIRouter:
             raise HTTPException(status_code=404, detail="Job not found")
         files = await app_state.store.list_files_for_job(job_id)
         failed = [f for f in files if f.external_status == "failed" or f.rag_status == "failed"]
+
+        lightrag = getattr(app_state, "lightrag", None)
+        forge = getattr(app_state, "forge", None)
+
+        retried = 0
+        not_retryable = []
         for f in failed:
-            await app_state.store.update_file(f.file_id, external_status="queued", rag_status="pending", error=None)
-        return {"retried": len(failed)}
+            # 재시도 가능: document가 upstream(forge)은 done인데 LightRAG ingest만 실패
+            #   → forge에서 변환 결과 재취득 후 재적재 (원본 bytes 불필요)
+            if (f.file_type == "document" and f.external_status == "done"
+                    and f.rag_status == "failed" and f.external_job_id and forge and lightrag):
+                try:
+                    forge_result = await forge.get_job(f.external_job_id)
+                    result_text = (forge_result.get("result") or {}).get("text", "")
+                    await app_state.store.update_file(f.file_id, rag_status="ingesting", error=None)
+                    await lightrag.ingest_text(
+                        content=result_text,
+                        metadata={"file_id": f.file_id, "job_id": f.job_id, "file_path": f.file_path},
+                    )
+                    await app_state.store.update_file(f.file_id, rag_status="ingested", completed_at=datetime.now(timezone.utc))
+                    retried += 1
+                except Exception as e:
+                    await app_state.store.update_file(f.file_id, rag_status="failed", error=str(e))
+                    not_retryable.append(f.file_id)
+            else:
+                # 원본 bytes 미보존(plsql) 또는 upstream 자체 실패 → 재시도 불가.
+                # queued 림보로 리셋하지 않음(영구 고착 방지), error·terminal 상태 보존, 재업로드 안내 대상.
+                not_retryable.append(f.file_id)
+
+        return {"retried": retried, "not_retryable": not_retryable}
 
     @router.get("/stats")
     async def stats():
@@ -99,6 +126,15 @@ def create_admin_router(app_state) -> APIRouter:
     @router.get("/health/all")
     async def health_all():
         results = {"ingestion_router": "ok"}
+        # DB readiness — Postgres 연결 시 풀 ping (#11). /health는 liveness 그대로 유지
+        pool = getattr(app_state, "pool", None)
+        if pool is not None:
+            try:
+                async with pool.acquire() as conn:
+                    await conn.fetchval("SELECT 1")
+                results["database"] = "ok"
+            except Exception:
+                results["database"] = "unreachable"
         config = getattr(app_state, "config", None)
         if config:
             for name, url in [

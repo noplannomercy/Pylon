@@ -15,6 +15,11 @@ class InMemoryJobStore:
         self._files: dict[str, IngestionFile] = {}
 
     async def create_job(self, source_type: str, repo: str = None, pr_number: int = None, commit_hash: str = None) -> IngestionJob:
+        # 멱등: (repo, pr_number, commit_hash) 셋 다 있으면 기존 job 재사용 (#7 webhook 재전송 방지)
+        if repo and pr_number is not None and commit_hash:
+            for j in self._jobs.values():
+                if j.repo == repo and j.pr_number == pr_number and j.commit_hash == commit_hash:
+                    return j
         job = IngestionJob(
             job_id=str(uuid.uuid4()),
             source_type=source_type,
@@ -67,6 +72,14 @@ class InMemoryJobStore:
         self._files[file_id] = f.model_copy(update=kwargs)
         return self._files[file_id]
 
+    async def claim_file(self, file_id: str, from_statuses: tuple, **updates) -> Optional[IngestionFile]:
+        # 원자적 조건부 전이 (#8). InMemory는 asyncio 단일스레드 + await 없음 → 검사·갱신 사이 yield 없어 원자적
+        f = self._files.get(file_id)
+        if f is None or f.external_status not in from_statuses:
+            return None
+        self._files[file_id] = f.model_copy(update=updates)
+        return self._files[file_id]
+
     async def list_files_for_job(self, job_id: str) -> list[IngestionFile]:
         return [f for f in self._files.values() if f.job_id == job_id]
 
@@ -109,6 +122,14 @@ class PostgresJobStore:
 
     async def create_job(self, source_type: str, repo: str = None, pr_number: int = None, commit_hash: str = None) -> IngestionJob:
         async with self._pool.acquire() as conn:
+            # 멱등: 셋 다 있으면 기존 job 재사용 (#7). UNIQUE 인덱스가 경합 시 정합성 보장
+            if repo and pr_number is not None and commit_hash:
+                existing = await conn.fetchrow(
+                    "SELECT * FROM ingestion_job WHERE repo=$1 AND pr_number=$2 AND commit_hash=$3",
+                    repo, pr_number, commit_hash,
+                )
+                if existing:
+                    return IngestionJob(**_row(existing))
             row = await conn.fetchrow(
                 "INSERT INTO ingestion_job (source_type, repo, pr_number, commit_hash) VALUES ($1,$2,$3,$4) RETURNING *",
                 source_type, repo, pr_number, commit_hash,
@@ -166,6 +187,20 @@ class PostgresJobStore:
             row = await conn.fetchrow(
                 f"UPDATE ingestion_file SET {sets} WHERE file_id = $1 RETURNING *",
                 file_id, *vals,
+            )
+        return IngestionFile(**_row(row)) if row else None
+
+    async def claim_file(self, file_id: str, from_statuses: tuple, **updates) -> Optional[IngestionFile]:
+        # 원자적 조건부 전이 (#8). 단일 UPDATE...WHERE external_status=ANY(...) RETURNING → DB가 원자성 보장
+        keys = list(updates.keys())
+        vals = list(updates.values())
+        sets = ", ".join(f"{k} = ${i+2}" for i, k in enumerate(keys))
+        status_idx = len(keys) + 2
+        async with self._pool.acquire() as conn:
+            row = await conn.fetchrow(
+                f"UPDATE ingestion_file SET {sets} "
+                f"WHERE file_id = $1 AND external_status = ANY(${status_idx}) RETURNING *",
+                file_id, *vals, list(from_statuses),
             )
         return IngestionFile(**_row(row)) if row else None
 

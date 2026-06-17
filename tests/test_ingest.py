@@ -120,6 +120,14 @@ def test_is_body_file_false():
     assert is_body_file(b"CREATE OR REPLACE PROCEDURE SP_PROC AS") is False
     assert is_body_file(b"-- header file\ncreate or replace package PKG as") is False
 
+def test_is_body_file_beyond_500_bytes():
+    """500바이트 넘는 라이선스 배너 뒤에 package body가 와도 탐지해야 함 (절단 버그 #1)."""
+    from ingest import is_body_file
+    banner = b"-- " + b"X" * 600 + b"\n"
+    content = banner + b"CREATE OR REPLACE PACKAGE BODY PKG_LOAN AS\nBEGIN\nNULL;\nEND;"
+    assert len(banner) > 500
+    assert is_body_file(content) is True
+
 @pytest.mark.asyncio
 async def test_dispatch_plsql_direct_success():
     from ingest import dispatch_plsql_direct

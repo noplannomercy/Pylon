@@ -7,11 +7,14 @@ class Config(BaseSettings):
     nexus_url: str = "http://localhost:8005"
     database_url: str = ""
     bitbucket_webhook_secret: str = ""
+    callback_secret: str = ""
     forge_api_key: str = ""
     lightrag_api_key: str = ""
     robotics_api_key: str = ""
     nexus_api_key: str = ""
     port: int = 8001
     self_url: str = "http://localhost:8001"
+    max_upload_files: int = 100
+    max_upload_bytes: int = 10_000_000
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}

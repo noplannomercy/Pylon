@@ -1,4 +1,5 @@
 import asyncio
+import hmac
 import json
 import logging
 import os
@@ -32,6 +33,16 @@ async def _safe_process(coro):
         await coro
     except Exception:
         logger.exception("Unhandled pipeline error")
+
+
+def _verify_callback_token(request) -> None:
+    # 콜백 무인증 RAG 주입 차단 (#3). 토큰은 Pylon이 발급한 callback_url에 실려 돌아옴.
+    secret = request.app.state.config.callback_secret
+    if not secret:
+        raise HTTPException(status_code=503, detail="Callback secret not configured")
+    token = request.query_params.get("token", "")
+    if not hmac.compare_digest(token, secret):
+        raise HTTPException(status_code=401, detail="Invalid callback token")
 
 
 def create_app(store=None, config: Config = None) -> FastAPI:
@@ -87,7 +98,10 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         body = await request.body()
         sig = request.headers.get("X-Hub-Signature", "")
         secret = request.app.state.config.bitbucket_webhook_secret
-        if secret and not verify_hmac(body, sig, secret):
+        # fail-closed: 시크릿 미설정이면 검증 불가 → 처리 거부 (#4, 예전 fail-open 제거)
+        if not secret:
+            raise HTTPException(status_code=503, detail="Bitbucket webhook secret not configured")
+        if not verify_hmac(body, sig, secret):
             raise HTTPException(status_code=401, detail="Invalid HMAC signature")
 
         payload = json.loads(body)
@@ -100,6 +114,11 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             pr_number=parsed["pr_number"],
             commit_hash=parsed["commit_hash"],
         )
+        # 멱등 재전송: 이미 파일이 있으면 중복 생성/디스패치 없이 기존 job 반환 (#7)
+        existing_files = await current_store.list_files_for_job(job.job_id)
+        if existing_files:
+            return {"job_id": job.job_id, "status": job.status, "file_count": len(existing_files), "idempotent": True}
+
         await current_store.update_job(job.job_id, status="processing", file_count=len(parsed["files"]))
 
         for file_path in parsed["files"]:
@@ -117,6 +136,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
 
     @app.post("/callback/forge")
     async def forge_callback(request: Request):
+        _verify_callback_token(request)
         body = await request.json()
         external_job_id = body.get("forge_job_id") or body.get("job_id", "")
         normalized = {
@@ -136,6 +156,7 @@ def create_app(store=None, config: Config = None) -> FastAPI:
 
     @app.post("/callback/robotics")
     async def robotics_callback(request: Request):
+        _verify_callback_token(request)
         body = await request.json()
         rdoc_job_id = body.get("rdoc_job_id", "")
         normalized = {
@@ -182,6 +203,10 @@ def create_app(store=None, config: Config = None) -> FastAPI:
         robotics = request.app.state.robotics
         config = request.app.state.config
 
+        # 가드레일: 파일 개수 상한 (#5)
+        if len(files) > config.max_upload_files:
+            raise HTTPException(status_code=413, detail=f"too many files (max {config.max_upload_files})")
+
         job = await store.create_job(source_type="upload")
         await store.update_job(job.job_id, status="processing", file_count=len(files))
 
@@ -190,6 +215,12 @@ def create_app(store=None, config: Config = None) -> FastAPI:
             file_name = _decode_filename(uf.filename or "")
             file_type = classify_file(file_name)
             f = await store.create_file(job_id=job.job_id, file_path=file_name, file_type=file_type)
+
+            # 가드레일: 파일당 크기 상한 (#5) — 초과 시 failed 기록, 디스패치 안 함
+            if len(file_bytes) > config.max_upload_bytes:
+                await store.update_file(f.file_id, external_status="failed",
+                                        error=f"file exceeds max size ({config.max_upload_bytes} bytes)")
+                continue
 
             if file_type == "skip":
                 await store.update_file(f.file_id, external_status="skipped", rag_status="skipped")
@@ -208,11 +239,16 @@ def create_app(store=None, config: Config = None) -> FastAPI:
                         dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag, update_status=False)
                     ))
                     # REVDOC → Robotics 제출 (상태 추적 primary)
-                    callback_url = f"{config.self_url}/callback/robotics"
+                    callback_url = f"{config.self_url}/callback/robotics?token={config.callback_secret}"
                     try:
                         result = await robotics.submit(file_bytes, file_name, callback_url)
                         ext_id = result.get("rdoc_job_id") or result.get("job_id", "")
-                        await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
+                        if not ext_id:
+                            # 빈 ext_id를 processing으로 저장하면 콜백이 모든 빈-id 파일에 fan-out (#9)
+                            logger.error("Robotics returned empty job id for %s", file_name)
+                            await store.update_file(f.file_id, external_status="failed", error="Robotics returned empty job id")
+                        else:
+                            await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
                     except Exception as e:
                         logger.error("Robotics submit failed for %s: %s", file_name, e)
                         await store.update_file(f.file_id, external_status="failed", error=str(e))
@@ -222,11 +258,16 @@ def create_app(store=None, config: Config = None) -> FastAPI:
                         dispatch_plsql_direct(f.file_id, job.job_id, file_bytes, file_name, store, request.app.state.lightrag)
                     ))
             elif file_type == "document":
-                callback_url = f"{config.self_url}/callback/forge"
+                callback_url = f"{config.self_url}/callback/forge?token={config.callback_secret}"
                 try:
                     result = await forge.convert(file_bytes, file_name, callback_url)
                     ext_id = result.get("job_id", "")
-                    await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
+                    if not ext_id:
+                        # 빈 ext_id를 processing으로 저장하면 콜백이 모든 빈-id 파일에 fan-out (#9)
+                        logger.error("Forge returned empty job id for %s", file_name)
+                        await store.update_file(f.file_id, external_status="failed", error="Forge returned empty job id")
+                    else:
+                        await store.update_file(f.file_id, external_job_id=ext_id, external_status="processing")
                 except Exception as e:
                     logger.error("Forge convert failed for %s: %s", file_name, e)
                     await store.update_file(f.file_id, external_status="failed", error=str(e))
