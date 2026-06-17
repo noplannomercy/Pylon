@@ -21,6 +21,7 @@ Pylon은 Bitbucket PR Merge 이벤트를 수신해 파일별로 Robotics(PL/SQL)
 | C3 | API 키, 시크릿 하드코딩 금지 | `.env` 또는 환경변수. config.py의 pydantic-settings로 관리. |
 | C4 | Robotics/Forge 콜백은 `external_job_id` 기준으로만 파일 역조회 | file_id는 내부 식별자, external_job_id가 외부 연결 키. |
 | C5 | Docker 컨테이너 내 `localhost`는 컨테이너 자신 | .env의 NEXUS_URL/ROBOTICS_URL/SELF_URL을 서버 IP로 설정해야 라우팅됨. SELF_URL이 localhost이면 Forge/Robotics callback이 컨테이너 자신으로 향해 실패. `docker restart`는 .env 미반영 — `docker compose up -d --force-recreate` 사용. |
+| C6 | Robotics `/jobs` 호출 시 인증키는 `X-Rdoc-Key` 헤더로 전송 | Robotics `auth.py`가 검증하는 헤더명. 과거 `X-API-Key`는 Robotics가 검증 안 해 사문 → 3시스템 통합 적대분석 triage로 계약 통일 (2026-06-17, `ingest.py` RoboticsClient). |
 
 ---
 
