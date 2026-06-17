@@ -59,7 +59,8 @@ class RoboticsClient:
     def __init__(self, base_url: str, api_key: str):
         headers = {}
         if api_key:
-            headers["X-API-Key"] = api_key
+            # Robotics auth.py가 검증하는 헤더는 X-Rdoc-Key (계약 통일, 기존 X-API-Key는 미검증 사문)
+            headers["X-Rdoc-Key"] = api_key
         self._client = httpx.AsyncClient(
             base_url=base_url,
             headers=headers,

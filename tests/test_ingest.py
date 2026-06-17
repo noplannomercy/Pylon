@@ -69,6 +69,13 @@ async def test_robotics_submit_success():
     assert result["job_id"] == "robotics-abc"
     await client.close()
 
+def test_robotics_client_sends_rdoc_key_header():
+    """Pylon→Robotics 헤더 계약 통일: Robotics가 검증하는 X-Rdoc-Key로 전송 (X-API-Key mismatch 해소)."""
+    from ingest import RoboticsClient
+    client = RoboticsClient(base_url="http://robotics:8004", api_key="secret-k")
+    assert client._client.headers.get("X-Rdoc-Key") == "secret-k"
+    assert "x-api-key" not in client._client.headers
+
 @pytest.mark.asyncio
 async def test_robotics_submit_http_error():
     from ingest import RoboticsClient
